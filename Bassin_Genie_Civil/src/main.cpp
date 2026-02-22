@@ -3,12 +3,9 @@
 #include <Wire.h>
 #include <MadgwickAHRS.h>
 
-const int trigPin = 6;
-const int echoPin = 7;
-
 // ===== PID =====
-float distance_ref = 15;
-float prev_target = 15;
+float distance_ref = 30;
+float prev_target;
 float error = 0;
 float prevError = 0;
 float integral = 0;
@@ -19,34 +16,37 @@ float Kp = 1.0;
 float Ki = 0.0;
 float Kd = 0.3;
 
-// ===== Filtrage =====
-float distance_filt = 15;
-const float alpha = 0.9; 
-
-// ===== Sonar =====
-float duration, distance;
-
-// ===== IMU =====
-const int MPU = 0x68;
-float AccX, AccY, AccZ;
-
-
-// ===== Madgwick =====
-Madgwick filter;
-
 // ===== Temps =====
 unsigned long lastTime = 0;
 float dt = 0.00; 
 
 // ===== Servo =====
 Servo myservo;
-float dist, cmd;
+float cmd;
 float servo_cmd = 65;
-float servo_cmd_filt = 65;
 const int servoNeutral = 65;
 const int servoMin = 50;
 const int servoMax = 80;
-const float servoStep = 1.0;
+
+// ===== Sonar UGT207 =====
+const int sonarPin = A0;
+int raw;
+float voltage;
+float distance;
+float distance_filt;
+const float alpha = 0.2;
+
+/*
+// ===== Sonar HC-SR04 =====
+float duration;
+float distance;
+const int trigPin = 6;
+const int echoPin = 7;
+
+// ===== IMU =====
+const int MPU = 0x68;
+float AccX, AccY, AccZ;
+Madgwick filter;
 
 // =======================================================
 // ================= Lecture Sonar =======================
@@ -77,7 +77,7 @@ void lectureIMU(){
   AccZ = (Wire.read() << 8 | Wire.read()) / 16384.0;
 
   // ---------- LECTURE GYRO ----------
-  /*
+  
   Wire.beginTransmission(MPU);
   Wire.write(0x43);
   Wire.endTransmission(false);
@@ -86,9 +86,32 @@ void lectureIMU(){
   GyroX = (Wire.read() << 8 | Wire.read()) / 131.0;
   GyroY = (Wire.read() << 8 | Wire.read()) / 131.0;
   GyroZ = (Wire.read() << 8 | Wire.read()) / 131.0;
-  */
-}
+  
+*/
+// =======================================================
+// ================= Lecture Sonar UGT207 =======================
+// =======================================================
+void readUGT207() {
 
+  raw = analogRead(sonarPin);
+  voltage = raw * (5.0 / 1023.0);
+
+  distance      = ((voltage - 0.97) / 4.0) * 200.0 + 20.0;
+  distance_filt = alpha * distance + (1 - alpha) * distance_filt;
+
+  distance_filt = constrain(distance_filt, 20.0, 220.0);
+
+  Serial.print("Tensipon: ");
+  Serial.print(voltage);
+  Serial.print(" V");
+  Serial.print('\t');
+
+  Serial.print("Distance: ");
+  Serial.print(distance_filt);
+  Serial.println(" cm");
+
+  delay(50);
+}
 // =======================================================
 // ===================== Fuzzy ===========================
 // =======================================================
@@ -120,6 +143,7 @@ void setup() {
   Serial.begin(9600);
   Wire.begin();
 
+  /*
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
 
@@ -127,11 +151,12 @@ void setup() {
   Wire.write(0x6B);                  
   Wire.write(0x00);                  
   Wire.endTransmission(true);
-  
+  filter.begin(100);
+  */
+
   myservo.attach(9);
   myservo.write(servoNeutral);
 
-  filter.begin(100);
   lastTime = millis();     
   delay(20);
 }
@@ -147,20 +172,17 @@ void loop() {
   lastTime = now;
 
   // ---------- LECTURE IMU -----------
-  lectureIMU();
+  //lectureIMU();
 
   // ---------- LECTURE SONAR ----------
-  GetDistance();
-  dist = constrain(distance, 0, 30);
-  
-  // ---------- FILTRAGE distance ----------
-  distance_filt = alpha * distance_filt + (1 - alpha) * dist;
+  //GetDistance();
+  readUGT207();
 
   // ---------- ERREUR ----------
   error = distance_ref - distance_filt;
 
   // ---------- DEADBAND ----------
-  if (abs(error) < 2) error = 0;
+  if (abs(error) < 1) error = 0;
 
   // ---------- INTEGRALE ----------
   integral += error * dt;
@@ -177,17 +199,14 @@ void loop() {
   float output = Kp * error + Ki * integral + Kd * derivative; 
   
   // ---------- SERVO (limitation vitesse) ----------
-  servo_cmd_filt = servoNeutral - output;
-  //cmd = 0.8 * cmd + 0.2 * servo_cmd_filt;
-  cmd = servo_cmd_filt;
+  servo_cmd = servoNeutral - output;
+  cmd = servo_cmd;
   cmd = constrain(cmd, servoMin, servoMax);
   myservo.write(cmd);
 
   // ---------- DEBUG ----------
   Serial.print("Distance: ");
   Serial.print(distance_filt);
-  Serial.print(" | AccZ: ");
-  Serial.print(AccZ);
   Serial.print(" | Servo: ");
   Serial.print(cmd);
   Serial.print(" | Kp: ");
