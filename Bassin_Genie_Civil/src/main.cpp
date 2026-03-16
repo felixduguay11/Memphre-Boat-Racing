@@ -1,10 +1,10 @@
 #include <Arduino.h>
 #include <Servo.h>
 #include <Wire.h>
-#include <MadgwickAHRS.h>
+//#include <MadgwickAHRS.h>
 
 // ===== PID =====
-float distance_ref = 30;
+float distance_ref = 35;
 float prev_target;
 float error = 0;
 float prevError = 0;
@@ -23,10 +23,13 @@ float dt = 0.00;
 // ===== Servo =====
 Servo myservo;
 float cmd;
-float servo_cmd = 65;
-const int servoNeutral = 65;
-const int servoMin = 50;
-const int servoMax = 80;
+float alpha_servo = 0.2;
+float servo_cmd = 120;
+const int servoNeutral = 120;
+const int servoMin = 110;
+const int servoMax = 140;
+//Servo 100kg cm (de 40 a 170)
+// Environ de 110 a 135 le range
 
 // ===== Sonar UGT207 =====
 const int sonarPin = A0;
@@ -34,7 +37,7 @@ int raw;
 float voltage;
 float distance;
 float distance_filt;
-const float alpha = 0.2;
+const float alpha_sonar = 0.2;
 
 /*
 // ===== Sonar HC-SR04 =====
@@ -97,20 +100,11 @@ void readUGT207() {
   voltage = raw * (5.0 / 1023.0);
 
   distance      = ((voltage - 0.97) / 4.0) * 200.0 + 20.0;
-  distance_filt = alpha * distance + (1 - alpha) * distance_filt;
+  distance_filt = alpha_sonar * distance + (1 - alpha_sonar) * distance_filt;
 
   distance_filt = constrain(distance_filt, 20.0, 220.0);
 
-  Serial.print("Tensipon: ");
-  Serial.print(voltage);
-  Serial.print(" V");
-  Serial.print('\t');
-
-  Serial.print("Distance: ");
-  Serial.print(distance_filt);
-  Serial.println(" cm");
-
-  delay(50);
+  //delay(10);
 }
 // =======================================================
 // ===================== Fuzzy ===========================
@@ -120,19 +114,19 @@ void fuzzyGainTuning(float e, float de) {
   //float absDE = abs(de);
 
   if (absE > 10) {          // grosse erreur
-      Kp = 2.5;
-      Ki = 0.0;
-      Kd = 1.5;
+      Kp = 0.8;             // 2.5
+      Ki = 0.0;             // 0.0
+      Kd = 0.6;             // 1.5
   }
   else if (absE > 5) {      // erreur moyenne
-      Kp = 1.5;
-      Ki = 0.02;
-      Kd = 0.8;
+      Kp = 0.6;             // 1.5
+      Ki = 0.05;            // 0.02
+      Kd = 0.4;             // 0.8
   }
   else {                    // proche consigne
-      Kp = 0.6;
-      Ki = 0.05;
-      Kd = 0.3;
+      Kp = 0.4;             // 0.6
+      Ki = 0.1;            // 0.05
+      Kd = 0.2;             // 0.3
   }
 }
 
@@ -200,7 +194,7 @@ void loop() {
   
   // ---------- SERVO (limitation vitesse) ----------
   servo_cmd = servoNeutral - output;
-  cmd = servo_cmd;
+  cmd = alpha_servo * servo_cmd + (1 - alpha_servo) * cmd;
   cmd = constrain(cmd, servoMin, servoMax);
   myservo.write(cmd);
 
@@ -209,12 +203,11 @@ void loop() {
   Serial.print(distance_filt);
   Serial.print(" | Servo: ");
   Serial.print(cmd);
-  Serial.print(" | Kp: ");
-  Serial.print(Kp);
-  Serial.print(" | Kd: ");
-  Serial.print(Kd);
-  Serial.print(" | derive: ");
-  Serial.println(derivative);
+  Serial.print(" | erreur: ");
+  Serial.print(error);
+  Serial.print("  |Tension: ");
+  Serial.print(voltage);
+  Serial.print('\n');
 }
 
 // =======================================================
