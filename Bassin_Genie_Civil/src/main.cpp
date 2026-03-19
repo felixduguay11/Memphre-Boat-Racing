@@ -4,7 +4,7 @@
 //#include <MadgwickAHRS.h>
 
 // ===== PID =====
-float distance_ref = 35;
+float distance_ref = 55;
 float prev_target;
 float error = 0;
 float prevError = 0;
@@ -24,10 +24,10 @@ float dt = 0.00;
 Servo myservo;
 float cmd;
 float alpha_servo = 0.2;
-float servo_cmd = 120;
-const int servoNeutral = 120;
-const int servoMin = 110;
-const int servoMax = 140;
+float servo_cmd = 148;
+const int servoNeutral = 148;
+const int servoMin = 120;
+const int servoMax = 163;
 //Servo 100kg cm (de 40 a 170)
 // Environ de 110 a 135 le range
 
@@ -114,9 +114,9 @@ void fuzzyGainTuning(float e, float de) {
   //float absDE = abs(de);
 
   if (absE > 10) {          // grosse erreur
-      Kp = 0.8;             // 2.5
+      Kp = 1.6;             // 2.5
       Ki = 0.0;             // 0.0
-      Kd = 0.6;             // 1.5
+      Kd = 1.9;             // 1.5
   }
   else if (absE > 5) {      // erreur moyenne
       Kp = 0.6;             // 1.5
@@ -193,9 +193,11 @@ void loop() {
   float output = Kp * error + Ki * integral + Kd * derivative; 
   
   // ---------- SERVO (limitation vitesse) ----------
-  servo_cmd = servoNeutral - output;
+  servo_cmd = servoNeutral + output;
   cmd = alpha_servo * servo_cmd + (1 - alpha_servo) * cmd;
+  //cmd = servo_cmd;
   cmd = constrain(cmd, servoMin, servoMax);
+  //cmd = map(cmd, servoMin, servoMax, servoMax, servoMin);
   myservo.write(cmd);
 
   // ---------- DEBUG ----------
@@ -207,6 +209,8 @@ void loop() {
   Serial.print(error);
   Serial.print("  |Tension: ");
   Serial.print(voltage);
+  Serial.print("  |Output: ");
+  Serial.print(output);
   Serial.print('\n');
 }
 
