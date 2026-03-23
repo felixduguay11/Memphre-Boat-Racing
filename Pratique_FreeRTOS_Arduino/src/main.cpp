@@ -9,7 +9,7 @@ Servo myservo;
 
 // Variables partagées
 float distance = 0.0;
-float output = 70.0;
+float output = 148.0;
 
 // variables globales
 float temps_capteurs;
