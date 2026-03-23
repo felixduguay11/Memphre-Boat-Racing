@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <Servo.h>
 #include <Wire.h>
-#include <FreeRTOS.h>
+#include <Arduino_FreeRTOS.h>
 #include <task.h>
 #include <semphr.h>
 
@@ -9,7 +9,7 @@ Servo myservo;
 
 // Variables partagées
 float distance = 0.0;
-float output = 148.0;
+float output = 0.0;
 
 // variables globales
 float temps_capteurs;
@@ -20,9 +20,25 @@ float temps_servos;
 SemaphoreHandle_t dataMutex;
 SemaphoreHandle_t serialMutex;
 
-// Pins sonar
-const int trigPin = 6;
-const int echoPin = 7;
+// Calculs
+float distance_ref = 55;
+float prev_target;
+float error = 0;
+float integral = 0;
+float derivative = 0;
+float Kp;
+float Ki;
+float Kd;
+
+// Sonar
+const int sonarPin = A0;
+float alpha_sonar = 0.2;          // Filtrage
+float voltage_0cm = 0.97;         // 0.97 = tension a distance de 0cm
+float courant_min = 4.0;          // 4.0 = 4.0mA a distance de 0cm
+float range_sonar = 200.0;        // 200 = Range du capteur (220cm - 20cm)
+float range_non_detection = 20.0; // 20 = range de non detection du capteur
+float tension_max = 5.0;          // 5.0 = tension maximale entrant (de la distance maximale)
+float bits_adc = 1023.0;          // 1023 = nombre de bits du ADC
 
 // =====================================================
 // TACHE 1 : Lecture Sonar
@@ -33,21 +49,18 @@ void Task_LectureSonar(void *ptr_sonar)
   (void) ptr_sonar;
 
   while (1){
-    float newDistance;
 
-    // Exemple squelette
-    digitalWrite(trigPin, LOW);
-    delayMicroseconds(2);
-    digitalWrite(trigPin, HIGH);
-    delayMicroseconds(10);
-    digitalWrite(trigPin, LOW);
+    int raw = analogRead(sonarPin);
+    float voltage = raw * (tension_max / bits_adc);
 
-    long duration = pulseIn(echoPin, HIGH, 30000);
-    newDistance = duration * 0.0343f / 2.0f;
+    float newDistance = ((voltage - voltage_0cm) / courant_min) * range_sonar + range_non_detection; 
+    float distance_filt = alpha_sonar * newDistance + (1 - alpha_sonar) * distance_filt;
+
+    distance_filt = constrain(distance_filt, 20.0, 220.0);
 
     // Protection mutex
     if (xSemaphoreTake(dataMutex, portMAX_DELAY)){
-      distance = newDistance;
+      distance = distance_filt;
       xSemaphoreGive(dataMutex);
     }
     TickType_t time_capteurs = xTaskGetTickCount();
@@ -75,19 +88,9 @@ void Task_Calculs(void *ptr_calculs){
   TickType_t lastWakeTime_calculs = xTaskGetTickCount();
   TickType_t prevTick = xTaskGetTickCount();
 
-  //---------- Variables ----------
-  float distance_ref = 15;
-  float prev_target = 15;
-  float error = 0;
-  float integral = 0;
-  float derivative;
-  float Kp;
-  float Ki;
-  float Kd;
-
   while (1){
 
-    float local_Distance = 0;
+    float local_Distance;
 
     if (xSemaphoreTake(dataMutex, portMAX_DELAY))
     {
@@ -98,7 +101,7 @@ void Task_Calculs(void *ptr_calculs){
     // ---------- Erreur ----------
     error = distance_ref - local_Distance;
     float absE = abs(error);
-    if (absE < 3) error = 0;
+    if (absE < 1) error = 0;
 
     // ---------- INTEGRALE ----------
     TickType_t now = xTaskGetTickCount();
@@ -115,19 +118,19 @@ void Task_Calculs(void *ptr_calculs){
     
     // ---------- FUZZY ----------
     if (absE > 10) {          // grosse erreur
-      Kp = 2.5;
-      Ki = 0.0;
-      Kd = 1.5;
+        Kp = 1.6;             // 2.5
+        Ki = 0.0;             // 0.0
+        Kd = 1.9;             // 1.5
     }
     else if (absE > 5) {      // erreur moyenne
-      Kp = 1.5;
-      Ki = 0.02;
-      Kd = 0.8;
+        Kp = 0.6;             // 1.5
+        Ki = 0.05;            // 0.02
+        Kd = 0.4;             // 0.8
     }
     else {                    // proche consigne
-      Kp = 0.6;
-      Ki = 0.05;
-      Kd = 0.3;
+        Kp = 0.4;             // 0.6
+        Ki = 0.1;            // 0.05
+        Kd = 0.2;             // 0.3
     }
 
     // ---------- PID ----------
@@ -199,9 +202,6 @@ void setup()
     Wire.begin();
     myservo.attach(9);
     myservo.write(70);
-
-    pinMode(trigPin, OUTPUT);
-    pinMode(echoPin, INPUT);
 
     dataMutex = xSemaphoreCreateMutex();
     serialMutex = xSemaphoreCreateMutex();
