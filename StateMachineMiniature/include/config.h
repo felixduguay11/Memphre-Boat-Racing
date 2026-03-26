@@ -33,17 +33,12 @@
 #define PIN_FOIL_REAR_LEFT  6
 #define PIN_FOIL_REAR_RIGHT 7
 
-// --- FlySky receiver (PWM input, 10 channels) ---
-#define PIN_RC_CH1          20   // Aileron  (roll cmd)
-#define PIN_RC_CH2          21   // Elevator (pitch cmd)
+// --- FlySky receiver (PWM input, 5 channels used) ---
+#define PIN_RC_CH1          20   // Rudder
 #define PIN_RC_CH3          22   // Throttle
-#define PIN_RC_CH4          23   // Rudder
-#define PIN_RC_CH5          24   // Switch A  (on/off)
-#define PIN_RC_CH6          25   // Switch B  (mode)
-#define PIN_RC_CH7          26   // VrA knob  (height setpoint)
-#define PIN_RC_CH8          27   // VrB knob  (spare)
-#define PIN_RC_CH9          28   // Switch C
-#define PIN_RC_CH10         29   // Switch D
+#define PIN_RC_CH5          24   // Switch A
+#define PIN_RC_CH6          25   // Switch B
+#define PIN_RC_CH7          26   // Switch C
 
 
 // ----------------------------------------------------------------
@@ -58,14 +53,13 @@
 #define IMU_ACCEL_RANGE     AccelRange::G4
 
 // Complementary filter: 0 = pure gyro, 1 = pure accel
-// 0.02 = slow drift correction, good for fast dynamics
 #define IMU_ALPHA           0.02f
 
 // Static calibration sample count (sensor must be still)
 #define IMU_CAL_SAMPLES     500
 
 // Update rate
-#define IMU_UPDATE_HZ       500          // [Hz]
+#define IMU_UPDATE_HZ       500
 #define IMU_PERIOD_US       (1000000UL / IMU_UPDATE_HZ)
 
 
@@ -82,47 +76,47 @@
 // ----------------------------------------------------------------
 // ■  ESC / MOTORS
 // ----------------------------------------------------------------
-#define ESC_PWM_FREQ_HZ     50           // Standard 50 Hz ESC signal
-#define ESC_PULSE_MIN_US    1000         // Full reverse / disarmed
+#define ESC_PWM_FREQ_HZ      50          // Standard 50 Hz ESC signal
+#define ESC_PULSE_MIN_US     1000        // Full reverse / disarmed
 #define ESC_PULSE_NEUTRAL_US 1500        // Stop
-#define ESC_PULSE_MAX_US    2000         // Full forward
-#define ESC_ARM_PULSE_US    ESC_PULSE_MIN_US
-#define ESC_ARM_DELAY_MS    2000         // Hold low pulse to arm
+#define ESC_PULSE_MAX_US     2000        // Full forward
+#define ESC_ARM_PULSE_US     ESC_PULSE_MIN_US
+#define ESC_ARM_DELAY_MS     2000        // Hold low pulse to arm
 
 
 // ----------------------------------------------------------------
 // ■  SERVOS
 // ----------------------------------------------------------------
 // Rudder (direction servo)
-#define RUDDER_PWM_FREQ_HZ  50
-#define RUDDER_PULSE_MIN_US 500
-#define RUDDER_PULSE_MAX_US 2500
-#define RUDDER_CENTER_US    1500
-#define RUDDER_MIN_DEG      0
-#define RUDDER_MAX_DEG      180
+#define RUDDER_PWM_FREQ_HZ   50
+#define RUDDER_PULSE_MIN_US  500
+#define RUDDER_PULSE_MAX_US  2500
+#define RUDDER_CENTER_US     1500
+#define RUDDER_MIN_DEG       0
+#define RUDDER_MAX_DEG       180
 
 // Hydrofoil servos (same spec for all three)
-#define FOIL_PWM_FREQ_HZ    50
-#define FOIL_PULSE_MIN_US   500
-#define FOIL_PULSE_MAX_US   2500
-#define FOIL_CENTER_US      1500         // Foil flat/neutral
-#define FOIL_MIN_DEG        0
-#define FOIL_MAX_DEG        180
+#define FOIL_PWM_FREQ_HZ     50
+#define FOIL_PULSE_MIN_US    500
+#define FOIL_PULSE_MAX_US    2500
+#define FOIL_CENTER_US       1500        // Foil flat/neutral
+#define FOIL_MIN_DEG         0
+#define FOIL_MAX_DEG         180
 
 // Physical travel limits (tune after installation)
-#define FOIL_ANGLE_MIN_DEG  60.0f        // Full dive
-#define FOIL_ANGLE_MAX_DEG  120.0f       // Full lift
-#define FOIL_ANGLE_NEUTRAL  90.0f        // Flat
+#define FOIL_ANGLE_MIN_DEG   60.0f       // Full dive
+#define FOIL_ANGLE_MAX_DEG   120.0f      // Full lift
+#define FOIL_ANGLE_NEUTRAL   90.0f       // Flat
 
 
 // ----------------------------------------------------------------
-// ■  RC RECEIVER  (FlySky, PWM)
+// ■  RC RECEIVER  (FlySky, PWM — 5 channels)
 // ----------------------------------------------------------------
-#define RC_PULSE_MIN_US     1000
-#define RC_PULSE_MAX_US     2000
-#define RC_PULSE_MID_US     1500
-#define RC_DEADBAND_US      30           // ±30 µs around centre
-#define RC_TIMEOUT_MS       500          // No pulse → failsafe
+#define RC_PULSE_MIN_US      1000
+#define RC_PULSE_MAX_US      2000
+#define RC_PULSE_MID_US      1500
+#define RC_DEADBAND_US       30          // ±30 µs around centre
+#define RC_TIMEOUT_MS        500         // No pulse → failsafe
 
 
 // ----------------------------------------------------------------
@@ -141,10 +135,10 @@
 #define HEIGHT_SETPOINT_MIN_CM       5.0f
 #define HEIGHT_SETPOINT_MAX_CM      25.0f
 
-#define HEIGHT_KP   2.0f
-#define HEIGHT_KI   0.1f
-#define HEIGHT_KD   0.5f
-#define HEIGHT_I_MAX  20.0f             // Anti-windup clamp [deg]
+#define HEIGHT_KP    2.0f
+#define HEIGHT_KI    0.1f
+#define HEIGHT_KD    0.5f
+#define HEIGHT_I_MAX 20.0f              // Anti-windup clamp [deg]
 
 
 // ----------------------------------------------------------------
@@ -152,15 +146,15 @@
 // ----------------------------------------------------------------
 #define ROLL_SETPOINT_DEG   0.0f        // Keep wings level
 
-#define ROLL_KP   3.0f
-#define ROLL_KI   0.05f
-#define ROLL_KD   0.8f
-#define ROLL_I_MAX  15.0f               // Anti-windup clamp [deg]
+#define ROLL_KP    3.0f
+#define ROLL_KI    0.05f
+#define ROLL_KD    0.8f
+#define ROLL_I_MAX 15.0f                // Anti-windup clamp [deg]
 
 
 // ----------------------------------------------------------------
 // ■  SERIAL DEBUG
 // ----------------------------------------------------------------
-#define SERIAL_BAUD         115200
-#define DEBUG_PRINT_HZ      10          // [Hz]
-#define DEBUG_PERIOD_MS     (1000UL / DEBUG_PRINT_HZ)
+#define SERIAL_BAUD      115200
+#define DEBUG_PRINT_HZ   10             // [Hz]
+#define DEBUG_PERIOD_MS  (1000UL / DEBUG_PRINT_HZ)

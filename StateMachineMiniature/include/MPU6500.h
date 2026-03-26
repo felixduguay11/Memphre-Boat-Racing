@@ -11,7 +11,7 @@
 
 #include <Arduino.h>
 #include <SPI.h>
-#include "Config.h"
+#include <Config.h>
 
 // ----------------------------------------------------------------
 // MPU6500 register map (subset)
