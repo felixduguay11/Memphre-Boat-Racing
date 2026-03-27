@@ -18,12 +18,12 @@
 #define PIN_IMU_CS          10
 
 // --- Sonar HC-SR04 ---
-#define PIN_SONAR_TRIG      14
-#define PIN_SONAR_ECHO      15
+#define PIN_SONAR_TRIG      14 // fil blanc
+#define PIN_SONAR_ECHO      15 // fil vert 
 
 // --- ESC (PWM) ---
-#define PIN_ESC_LEFT        2
-#define PIN_ESC_RIGHT       3
+#define PIN_ESC_LEFT        2 // fil vert
+#define PIN_ESC_RIGHT       3 // fil bleu 
 
 // --- Servo: direction (rudder) ---
 #define PIN_SERVO_RUDDER    4
