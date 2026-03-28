@@ -45,13 +45,15 @@ public:
     float    rudder()   const { return _data.channel[0]; }  // CH1 [-1, +1]
     float    throttle() const { return _data.channel[1]; }  // CH3 [ 0, +1]
     bool     switchA()  const { return _data.channel[2] > 0.5f; }  // CH5
-    bool     switchB()  const { return _data.channel[3] > 0.5f; }  // CH6
+    float    knobHeight() const { return _data.channel[3]; }       // CH6 [-1,+1]
     bool     switchC()  const { return _data.channel[4] > 0.5f; }  // CH7
 
     uint16_t getPulseUs(uint8_t ch) const;
 
     // ISR callback — do not call manually
     void onEdge(uint8_t ch);
+
+    void printDebug() const;
 
 private:
     volatile uint32_t _riseTime[RC_NUM_CHANNELS] = {};

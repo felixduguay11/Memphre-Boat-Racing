@@ -231,3 +231,9 @@ void IMU::writeRegister(uint8_t reg, uint8_t value)
     csHigh();
     SPI.endTransaction();
 }
+
+void IMU::printDebug() const
+{
+    Serial.printf("[IMU] Roll: %6.1f deg  Pitch: %6.1f deg  Temp: %.1f C\n",
+    _data.roll_deg, _data.pitch_deg, _data.temp_c);
+}

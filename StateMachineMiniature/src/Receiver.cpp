@@ -128,3 +128,11 @@ uint16_t RCReceiver::getPulseUs(uint8_t ch) const
     if (ch >= RC_NUM_CHANNELS) return RC_PULSE_MID_US;
     return _data.pulseUs[ch];
 }
+
+void RCReceiver::printDebug() const
+{
+    Serial.printf("[RC]    Thr: %5.2f  Rud: %5.2f  SwA:%d SwB:%d SwC:%d\n",
+                          throttle(), rudder(),
+                          switchA(), knobHeight(), switchC());
+
+}

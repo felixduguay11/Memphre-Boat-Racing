@@ -102,3 +102,8 @@ void Sonar::echoISR()
         _echoReady = true;
     }
 }
+
+void Sonar::printDebug() const
+{
+    Serial.printf("[Sonar] Distance: %6.1f cm\n", _filteredCm);
+}

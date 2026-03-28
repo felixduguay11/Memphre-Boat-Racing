@@ -26,12 +26,12 @@
 #define PIN_ESC_RIGHT       3 // fil bleu 
 
 // --- Servo: direction (rudder) ---
-#define PIN_SERVO_RUDDER    4
+#define PIN_SERVO_RUDDER    4 // fil orange
 
 // --- Servos: hydrofoils ---
-#define PIN_FOIL_FRONT      5
-#define PIN_FOIL_REAR_LEFT  6
-#define PIN_FOIL_REAR_RIGHT 7
+#define PIN_FOIL_FRONT      5 // fil vert
+#define PIN_FOIL_REAR_LEFT  6 // fil rouge
+#define PIN_FOIL_REAR_RIGHT 7 // fil jaune
 
 // --- FlySky receiver (PWM input, 5 channels used) ---
 #define PIN_RC_CH1          20   // Rudder
@@ -104,8 +104,8 @@
 #define FOIL_MAX_DEG         180
 
 // Physical travel limits (tune after installation)
-#define FOIL_ANGLE_MIN_DEG   60.0f       // Full dive
-#define FOIL_ANGLE_MAX_DEG   120.0f      // Full lift
+#define FOIL_ANGLE_MIN_DEG   35.0f       // Full dive
+#define FOIL_ANGLE_MAX_DEG   145.0f      // Full lift
 #define FOIL_ANGLE_NEUTRAL   90.0f       // Flat
 
 
@@ -124,14 +124,19 @@
 // ----------------------------------------------------------------
 // Speed thresholds for Run sub-state transitions
 // Expressed as fraction of max throttle (0.0 – 1.0)
-#define SM_SPEED_THRESHOLD_HIGH   0.25f  // Avance → Contrôle
-#define SM_SPEED_THRESHOLD_LOW    0.185f // Contrôle → Avance
+#define SM_SPEED_THRESHOLD_HIGH   0.10f  // Avance → Contrôle
+#define SM_SPEED_THRESHOLD_LOW    0.085f // Contrôle → Avance
 
 
 // ----------------------------------------------------------------
 // ■  HEIGHT CONTROLLER  (active in CONTROLE state)
 // ----------------------------------------------------------------
-#define HEIGHT_SETPOINT_DEFAULT_CM  10.0f
+// Height setpoint mode
+// 1 = fixed (HEIGHT_SETPOINT_DEFAULT_CM)
+// 0 = adjustable via knob CH6
+#define HEIGHT_SETPOINT_FIXED  0
+
+#define HEIGHT_SETPOINT_DEFAULT_CM  18.0f
 #define HEIGHT_SETPOINT_MIN_CM       5.0f
 #define HEIGHT_SETPOINT_MAX_CM      25.0f
 

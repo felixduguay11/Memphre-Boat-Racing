@@ -18,7 +18,7 @@
 // ============================================================
 
 #include <Arduino.h>
-#include <Servo.h>
+#include <PWMServo.h>
 #include <Config.h>
 
 class ESC {
@@ -51,9 +51,11 @@ public:
     float getThrottle() const { return _throttle; }
     bool  isArmed()     const { return _armed;    }
 
+    void printDebug() const;
+    
 private:
-    Servo _escLeft;
-    Servo _escRight;
+    PWMServo _escLeft;
+    PWMServo _escRight;
 
     float _throttle = 0.0f;
     bool  _armed    = false;

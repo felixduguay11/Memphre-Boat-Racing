@@ -5,79 +5,62 @@
 
 #include <ESC.h>
 
+// Convert [-1.0, +1.0] → degrees (0–180) for PWMServo
+// Maps: -1 → 0°, 0 → 90°, +1 → 180°
+static uint8_t toDeg(float throttle)
+{
+    float deg = 90.0f + throttle * 90.0f;
+    if (deg > 180.0f) deg = 180.0f;
+    if (deg <   0.0f) deg =   0.0f;
+    return (uint8_t)deg;
+}
 
-// ----------------------------------------------------------------
-// begin()  –  arm sequence
-// ----------------------------------------------------------------
 void ESC::begin()
 {
     _escLeft.attach(PIN_ESC_LEFT);
     _escRight.attach(PIN_ESC_RIGHT);
 
-    // Arming: hold minimum pulse for ESC_ARM_DELAY_MS
-    _escLeft.writeMicroseconds(ESC_ARM_PULSE_US);
-    _escRight.writeMicroseconds(ESC_ARM_PULSE_US);
+    // Arming: hold minimum (0°) for ESC_ARM_DELAY_MS
+    _escLeft.write(0);
+    _escRight.write(0);
     delay(ESC_ARM_DELAY_MS);
 
     _armed    = true;
     _throttle = 0.0f;
 
-    // Go to neutral after arming
     stop();
-
     Serial.println("[ESC] Armed OK");
 }
 
-// ----------------------------------------------------------------
-// set()
-// ----------------------------------------------------------------
 void ESC::set(float throttle)
 {
     if (!_armed) return;
-
-    // Clamp [-1, +1]
     if (throttle >  1.0f) throttle =  1.0f;
     if (throttle < -1.0f) throttle = -1.0f;
 
     _throttle = throttle;
-
-    uint16_t pulse = toPulse(throttle);
-    _escLeft.writeMicroseconds(pulse);
-    _escRight.writeMicroseconds(pulse);
+    uint8_t deg = toDeg(throttle);
+    _escLeft.write(deg);
+    _escRight.write(deg);
 }
 
-// ----------------------------------------------------------------
-// stop()
-// ----------------------------------------------------------------
 void ESC::stop()
 {
     _throttle = 0.0f;
-    _escLeft.writeMicroseconds(ESC_PULSE_NEUTRAL_US);
-    _escRight.writeMicroseconds(ESC_PULSE_NEUTRAL_US);
+    _escLeft.write(90);   // 90° = neutral = 1500 µs
+    _escRight.write(90);
 }
 
-// ----------------------------------------------------------------
-// disarm()
-// ----------------------------------------------------------------
 void ESC::disarm()
 {
     _throttle = 0.0f;
     _armed    = false;
-    _escLeft.writeMicroseconds(ESC_ARM_PULSE_US);
-    _escRight.writeMicroseconds(ESC_ARM_PULSE_US);
+    _escLeft.write(0);
+    _escRight.write(0);
     Serial.println("[ESC] Disarmed");
 }
 
-// ----------------------------------------------------------------
-// toPulse()  –  [-1.0, +1.0] → [ESC_PULSE_MIN_US, ESC_PULSE_MAX_US]
-// ----------------------------------------------------------------
-uint16_t ESC::toPulse(float throttle) const
+void ESC::printDebug() const
 {
-    float pulse = ESC_PULSE_NEUTRAL_US
-                + throttle * (float)(ESC_PULSE_MAX_US - ESC_PULSE_NEUTRAL_US);
-
-    if (pulse > ESC_PULSE_MAX_US) pulse = ESC_PULSE_MAX_US;
-    if (pulse < ESC_PULSE_MIN_US) pulse = ESC_PULSE_MIN_US;
-
-    return (uint16_t)pulse;
+    Serial.printf("[ESC]   Throttle: %5.2f\n", getThrottle());
 }

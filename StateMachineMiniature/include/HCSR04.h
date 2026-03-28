@@ -35,6 +35,8 @@ public:
     // ISR callback — public for the wrapper, do not call manually
     void echoISR();
 
+    void printDebug() const;
+
 private:
     uint8_t  _trigPin;
     uint8_t  _echoPin;
