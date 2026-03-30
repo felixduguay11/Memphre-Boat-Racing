@@ -89,23 +89,23 @@
 // ----------------------------------------------------------------
 // Rudder (direction servo)
 #define RUDDER_PWM_FREQ_HZ   50
-#define RUDDER_PULSE_MIN_US  500
-#define RUDDER_PULSE_MAX_US  2500
+#define RUDDER_PULSE_MIN_US  1000
+#define RUDDER_PULSE_MAX_US  2000
 #define RUDDER_CENTER_US     1500
 #define RUDDER_MIN_DEG       0
 #define RUDDER_MAX_DEG       180
 
 // Hydrofoil servos (same spec for all three)
 #define FOIL_PWM_FREQ_HZ     50
-#define FOIL_PULSE_MIN_US    500
-#define FOIL_PULSE_MAX_US    2500
+#define FOIL_PULSE_MIN_US    1000
+#define FOIL_PULSE_MAX_US    2000
 #define FOIL_CENTER_US       1500        // Foil flat/neutral
 #define FOIL_MIN_DEG         0
 #define FOIL_MAX_DEG         180
 
 // Physical travel limits (tune after installation)
-#define FOIL_ANGLE_MIN_DEG   35.0f       // Full dive
-#define FOIL_ANGLE_MAX_DEG   145.0f      // Full lift
+#define FOIL_ANGLE_MIN_DEG   25.0f       // Full dive
+#define FOIL_ANGLE_MAX_DEG   165.0f      // Full lift
 #define FOIL_ANGLE_NEUTRAL   90.0f       // Flat
 
 
@@ -134,16 +134,16 @@
 // Height setpoint mode
 // 1 = fixed (HEIGHT_SETPOINT_DEFAULT_CM)
 // 0 = adjustable via knob CH6
-#define HEIGHT_SETPOINT_FIXED  0
+#define HEIGHT_SETPOINT_FIXED  1
 
 #define HEIGHT_SETPOINT_DEFAULT_CM  18.0f
 #define HEIGHT_SETPOINT_MIN_CM       5.0f
 #define HEIGHT_SETPOINT_MAX_CM      25.0f
 
-#define HEIGHT_KP    2.0f
-#define HEIGHT_KI    0.1f
-#define HEIGHT_KD    0.5f
-#define HEIGHT_I_MAX 20.0f              // Anti-windup clamp [deg]
+#define HEIGHT_KP    3.25f
+#define HEIGHT_KI    1.25f
+#define HEIGHT_KD    0.75f
+#define HEIGHT_I_MAX 25.0f              // Anti-windup clamp [deg]
 
 
 // ----------------------------------------------------------------
@@ -151,9 +151,9 @@
 // ----------------------------------------------------------------
 #define ROLL_SETPOINT_DEG   0.0f        // Keep wings level
 
-#define ROLL_KP    3.0f
-#define ROLL_KI    0.05f
-#define ROLL_KD    0.8f
+#define ROLL_KP    2.0f
+#define ROLL_KI    0.750f
+#define ROLL_KD    0.25f
 #define ROLL_I_MAX 15.0f                // Anti-windup clamp [deg]
 
 

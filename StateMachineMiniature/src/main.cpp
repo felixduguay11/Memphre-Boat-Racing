@@ -1,7 +1,4 @@
-// ============================================================
-//  main.cpp  –  RC Hydrofoil – Teensy 4.1
-//  Phase 7: PID hauteur + roulis intégrés
-// ============================================================
+// Memphre Boat Racing
 
 #include <Arduino.h>
 #include <Config.h>
@@ -33,7 +30,7 @@ static uint32_t lastBlink     = 0;
 
 static constexpr uint32_t SONAR_PERIOD_MS   = 1000UL / SONAR_UPDATE_HZ;
 static constexpr uint32_t RC_PERIOD_MS      = 20;
-static constexpr uint32_t CONTROL_PERIOD_MS = 20;   // 50 Hz
+static constexpr uint32_t CONTROL_PERIOD_MS = 50;   
 
 // Track previous CONTROLE state to reset PIDs on entry
 static bool wasControl = false;
@@ -171,9 +168,9 @@ void loop()
                         );
 
                         // Mix: height lifts all, roll tilts rear
-                        float front     = FOIL_ANGLE_NEUTRAL + heightOut;
-                        float rearLeft  = FOIL_ANGLE_NEUTRAL + heightOut + rollOut;
-                        float rearRight = FOIL_ANGLE_NEUTRAL + heightOut - rollOut;
+                        float front     = FOIL_ANGLE_NEUTRAL; //- heightOut;
+                        float rearLeft  = FOIL_ANGLE_NEUTRAL + rollOut; //- heightOut 
+                        float rearRight = FOIL_ANGLE_NEUTRAL - rollOut; //- heightOut 
 
                         foils.set(front, rearLeft, rearRight);
                         break;
@@ -186,15 +183,15 @@ void loop()
     // Serial debug at 10 Hz
     if ((now_ms - lastPrint) >= DEBUG_PERIOD_MS) {
         lastPrint = now_ms;
-        sm.printDebug();
-        // imu.printDebug();
+        // sm.printDebug();
+        imu.printDebug();
         // sonar.printDebug();
         // rc.printDebug();
         // esc.printDebug();
         // rudder.printDebug();
-        // foils.printDebug();
+        foils.printDebug();
         if (sm.isControl()) {
-            heightCtrl.printDebug();
+            // heightCtrl.printDebug();
             rollCtrl.printDebug();
         }
         Serial.println("---");
