@@ -168,9 +168,9 @@ void loop()
                         );
 
                         // Mix: height lifts all, roll tilts rear
-                        float front     = FOIL_ANGLE_NEUTRAL; //- heightOut;
-                        float rearLeft  = FOIL_ANGLE_NEUTRAL + rollOut; //- heightOut 
-                        float rearRight = FOIL_ANGLE_NEUTRAL - rollOut; //- heightOut 
+                        float front     = FOIL_ANGLE_NEUTRAL - heightOut;
+                        float rearLeft  = FOIL_ANGLE_NEUTRAL - heightOut + rollOut; // 
+                        float rearRight = FOIL_ANGLE_NEUTRAL - heightOut - rollOut; //
 
                         foils.set(front, rearLeft, rearRight);
                         break;

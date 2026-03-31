@@ -70,7 +70,7 @@
 #define SONAR_PERIOD_US     (1000000UL / SONAR_UPDATE_HZ)
 #define SONAR_MIN_CM        2.0f         // Below = invalid
 #define SONAR_MAX_CM        400.0f       // Above = invalid
-#define SONAR_FILTER_ALPHA  0.15f        // Low-pass: 0=frozen, 1=raw
+#define SONAR_FILTER_ALPHA  0.25f        // Low-pass: 0=frozen, 1=raw
 
 
 // ----------------------------------------------------------------
