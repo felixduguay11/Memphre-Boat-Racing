@@ -108,11 +108,11 @@ void MTi670::feedByte(uint8_t b) {
         case State::WAIT_CHK: {
             _pkt[_pktIdx++] = b;
             uint8_t sum = 0;
-            for (int i = 2; i < _pktIdx; i++) sum += _pkt[i];
+            for (int i = 1; i < _pktIdx; i++) sum += _pkt[i];
             if (sum == 0x00) {
                 processPacket();
             } else {
-                Serial.println("[MTi670] Checksum error");
+                Serial.printf("[MTi670] Checksum error (sum=0x%02X len=%d MID=0x%02X)\n", sum, _pktIdx, _mid);
             }
             _state = State::WAIT_PRE;
             break;
