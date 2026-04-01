@@ -5,214 +5,265 @@
 #include <task.h>
 #include <semphr.h>
 
-Servo myservo;
-
-// Variables partagées
+// Variables partagées (protégées par dataMutex)
 float distance = 0.0;
-float output = 0.0;
+float output   = 0.0;
+float cmd      = 0.0;
 
-// variables globales
-float temps_capteurs;
-float temps_calculs;
-float temps_servos;
+// Temps d'exécution en microsecondes (protégés par dataMutex)
+volatile float temps_capteurs_us = 0.0;
+volatile float temps_calculs_us  = 0.0;
+volatile float temps_servos_us   = 0.0;
 
-// Mutex pour protection
+// Mutex
 SemaphoreHandle_t dataMutex;
-SemaphoreHandle_t serialMutex;
 
-// Calculs
-float distance_ref = 55;
-float prev_target;
-float error = 0;
-float integral = 0;
-float derivative = 0;
-float Kp;
-float Ki;
-float Kd;
+float distance_ref  = 70.0f;
+float distance_filt = 70.0f;
+
+// Calculs PID
+float prev_target   = 0.0;
+float error         = 0.0;
+float integral      = 0.0;
+float derivative    = 0.0;
+float Kp, Ki, Kd;
 
 // Sonar
-const int sonarPin = A0;
-float alpha_sonar = 0.2;          // Filtrage
-float voltage_0cm = 0.97;         // 0.97 = tension a distance de 0cm
-float courant_min = 4.0;          // 4.0 = 4.0mA a distance de 0cm
-float range_sonar = 200.0;        // 200 = Range du capteur (220cm - 20cm)
-float range_non_detection = 20.0; // 20 = range de non detection du capteur
-float tension_max = 5.0;          // 5.0 = tension maximale entrant (de la distance maximale)
-float bits_adc = 1023.0;          // 1023 = nombre de bits du ADC
+const int sonarPin        = A0;
+float alpha_sonar         = 0.2f;
+float voltage_0cm         = 0.97f;
+float range_sonar         = 200.0f;
+float range_non_detection = 20.0f;
+float tension_max         = 5.0f;
+float bits_adc            = 1023.0f;
+
+// Servo
+Servo myservo;
+float servo_cmd        = 0.0f;
+float cmd_filt         = 0.0f;
+float alpha_servo      = 0.2f;
+const int servoNeutral = 148;
+const int servo_min    = 120;
+const int servo_max    = 163;
+
 
 // =====================================================
-// TACHE 1 : Lecture Sonar
+// TACHE 1 : Lecture Sonar  (priorité 1)
 // =====================================================
 void Task_LectureSonar(void *ptr_sonar)
 {
-  TickType_t lastWakeTime_capteurs = xTaskGetTickCount();
   (void) ptr_sonar;
+  TickType_t lastWakeTime = xTaskGetTickCount();
 
-  while (1){
+  while (1)
+  {
+    uint16_t t_debut = TCNT1;  // timer hardware 16-bit, 62.5ns/tick à 16MHz
 
-    int raw = analogRead(sonarPin);
+    int raw       = analogRead(sonarPin);
     float voltage = raw * (tension_max / bits_adc);
 
-    float newDistance = ((voltage - voltage_0cm) / courant_min) * range_sonar + range_non_detection; 
-    float distance_filt = alpha_sonar * newDistance + (1 - alpha_sonar) * distance_filt;
+    float newDistance = ((voltage - voltage_0cm) / (tension_max - voltage_0cm)) * range_sonar + range_non_detection;
+    distance_filt = alpha_sonar * newDistance + (1.0f - alpha_sonar) * distance_filt;
+    distance_filt = constrain(distance_filt, 20.0f, 220.0f);
 
-    distance_filt = constrain(distance_filt, 20.0, 220.0);
+    uint16_t t_fin = TCNT1;
+    float duree_us = (t_fin - t_debut) / 16.0f;  // en microsecondes
 
-    // Protection mutex
-    if (xSemaphoreTake(dataMutex, portMAX_DELAY)){
-      distance = distance_filt;
+    if (xSemaphoreTake(dataMutex, portMAX_DELAY))
+    {
+      distance          = distance_filt;
+      temps_capteurs_us = duree_us;
       xSemaphoreGive(dataMutex);
     }
-    TickType_t time_capteurs = xTaskGetTickCount();
-    temps_capteurs = time_capteurs - lastWakeTime_capteurs;
 
-    if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(10)))
-    {
-      Serial.print("sonar temps: ");
-      Serial.println(temps_capteurs);
-      Serial.print(" | Distance: ");
-      Serial.print(distance);
-      xSemaphoreGive(serialMutex);
-    }
-
-    vTaskDelayUntil(&lastWakeTime_capteurs, pdMS_TO_TICKS(200)); // 100ms = 0.1s = 10Hz
+    vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(10));
   }
 }
 
-// =====================================================
-// TACHE 2 : Calculs (PID / Fuzzy / Filtre)
-// =====================================================
-void Task_Calculs(void *ptr_calculs){
-  
-  (void) ptr_calculs;
-  TickType_t lastWakeTime_calculs = xTaskGetTickCount();
-  TickType_t prevTick = xTaskGetTickCount();
 
-  while (1){
+// =====================================================
+// TACHE 2 : Calculs PID Fuzzy  (priorité 3)
+// =====================================================
+void Task_Calculs(void *ptr_calculs)
+{
+  (void) ptr_calculs;
+  TickType_t lastWakeTime = xTaskGetTickCount();
+  TickType_t prevTick     = lastWakeTime;
+
+  while (1)
+  {
+    uint16_t t_debut = TCNT1;
 
     float local_Distance;
-
     if (xSemaphoreTake(dataMutex, portMAX_DELAY))
     {
       local_Distance = distance;
       xSemaphoreGive(dataMutex);
     }
 
-    // ---------- Erreur ----------
-    error = distance_ref - local_Distance;
+    // --- Erreur ---
+    error      = distance_ref - local_Distance;
     float absE = abs(error);
-    if (absE < 1) error = 0;
+    if (absE < 1.0f) error = 0.0f;
 
-    // ---------- INTEGRALE ----------
+    // --- dt ---
     TickType_t now = xTaskGetTickCount();
     float dt = (now - prevTick) * portTICK_PERIOD_MS / 1000.0f;
     prevTick = now;
-    if (dt <= 0.0001f) dt = 0.0001f;
+    if (dt < 0.0001f) dt = 0.0001f;     // Protection pour la premiere iteration
 
+    // --- Integrale ---
     integral += error * dt;
-    integral = constrain(integral, -20, 20);
+    integral = constrain(integral, -20.0f, 20.0f);
 
-    // ---------- DERIVEE ----------
-    derivative = -(local_Distance - prev_target) / dt;
+    // --- Derivee ---
+    derivative  = -(local_Distance - prev_target) / dt;
     prev_target = local_Distance;
-    
-    // ---------- FUZZY ----------
-    if (absE > 10) {          // grosse erreur
-        Kp = 1.6;             // 2.5
-        Ki = 0.0;             // 0.0
-        Kd = 1.9;             // 1.5
-    }
-    else if (absE > 5) {      // erreur moyenne
-        Kp = 0.6;             // 1.5
-        Ki = 0.05;            // 0.02
-        Kd = 0.4;             // 0.8
-    }
-    else {                    // proche consigne
-        Kp = 0.4;             // 0.6
-        Ki = 0.1;            // 0.05
-        Kd = 0.2;             // 0.3
+
+    // --- Fuzzy ---
+    if (absE > 10.0f) {
+      Kp = 1.6f;  Ki = 0.0f;   Kd = 1.9f;
+    } else if (absE > 5.0f) {
+      Kp = 0.6f;  Ki = 0.05f;  Kd = 0.4f;
+    } else {
+      Kp = 0.4f;  Ki = 0.1f;   Kd = 0.2f;
     }
 
-    // ---------- PID ----------
     float newOutput = Kp * error + Ki * integral + Kd * derivative;
+
+    uint16_t t_fin = TCNT1;
+    float duree_us = (t_fin - t_debut) / 16.0f;
 
     if (xSemaphoreTake(dataMutex, portMAX_DELAY))
     {
-      output = newOutput;
+      output           = newOutput;
+      temps_calculs_us = duree_us;
       xSemaphoreGive(dataMutex);
     }
-    TickType_t time_calculs = xTaskGetTickCount();
-    temps_calculs = time_calculs - lastWakeTime_calculs;
 
-    if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(5)))
-    {
-      Serial.print("calculs: ");
-      Serial.println(temps_calculs);
-      xSemaphoreGive(serialMutex);
-    }
-
-    vTaskDelayUntil(&lastWakeTime_calculs, pdMS_TO_TICKS(200)); // 100ms = 0.1s = 10Hz
+    vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(50));
   }
 }
 
+
 // =====================================================
-// TACHE 3 : Commande Servo
+// TACHE 3 : Commande Servo  (priorité 2)
 // =====================================================
 void Task_CommandeServo(void *ptr_commande)
 {
   (void) ptr_commande;
-  TickType_t lastWakeTime_servo = xTaskGetTickCount();
-
-  float servo_cmd;
-  float servoNeutral = 100;
+  TickType_t lastWakeTime = xTaskGetTickCount();
 
   while (1)
   {
-    float localOutput = 0;
+    uint16_t t_debut = TCNT1;
 
+    float localOutput;
     if (xSemaphoreTake(dataMutex, portMAX_DELAY))
     {
       localOutput = output;
       xSemaphoreGive(dataMutex);
     }
 
-    servo_cmd =  servoNeutral - localOutput;
-    myservo.write(constrain(servo_cmd, 30, 170));
+    servo_cmd = servoNeutral + localOutput;
+    cmd_filt  = alpha_servo * servo_cmd + (1.0f - alpha_servo) * cmd_filt;
+    cmd       = constrain(cmd_filt, servo_min, servo_max);
+    myservo.write((int)cmd);
 
-    TickType_t time_servo = xTaskGetTickCount();
-    temps_servos = time_servo - lastWakeTime_servo;
+    uint16_t t_fin = TCNT1;
+    float duree_us = (t_fin - t_debut) / 16.0f;
 
-    if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(5)))
+    if (xSemaphoreTake(dataMutex, portMAX_DELAY))
     {
-      Serial.print("servo: ");
-      Serial.println(temps_servos);
-      xSemaphoreGive(serialMutex);
+      temps_servos_us = duree_us;
+      xSemaphoreGive(dataMutex);
     }
 
-    vTaskDelayUntil(&lastWakeTime_servo, pdMS_TO_TICKS(200)); // 100ms = 0.1s = 10Hz
+    vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(50));
   }
 }
+
+
+// =====================================================
+// TACHE 4 : Debug Serial  (priorité 1 — basse)
+// Seule tâche à utiliser Serial → plus de contention
+// =====================================================
+void Task_Debug(void *ptr_debug)
+{
+  (void) ptr_debug;
+  TickType_t lastWakeTime = xTaskGetTickCount();
+
+  while (1)
+  {
+    uint16_t t_debut = TCNT1;
+
+    float d, o, c, t_s, t_c, t_sv;
+
+    if (xSemaphoreTake(dataMutex, portMAX_DELAY))
+    {
+      d    = distance;
+      o    = output;
+      c    = cmd;
+      t_s  = temps_capteurs_us;
+      t_c  = temps_calculs_us;
+      t_sv = temps_servos_us;
+      xSemaphoreGive(dataMutex);
+    }
+
+    Serial.print(F("[Sonar]   "));
+    Serial.print(t_s, 1);
+    Serial.print(F(" us  |  Dist="));
+    Serial.print(d, 1);
+    Serial.println(F(" cm"));
+
+    Serial.print(F("[Calculs] "));
+    Serial.print(t_c, 1);
+    Serial.print(F(" us  |  Erreur="));
+    Serial.print(distance_ref - d, 2);
+    Serial.print(F("  Output="));
+    Serial.println(o, 2);
+
+    Serial.print(F("[Servo]   "));
+    Serial.print(t_sv, 1);
+    Serial.print(F(" us  |  Cmd="));
+    Serial.println(c, 1);
+
+    uint16_t t_fin = TCNT1;
+    float duree_us = (t_fin - t_debut) / 16.0f;
+
+    Serial.print(F("[Prints]   "));
+    Serial.print(duree_us, 1);
+    Serial.print(F(" us  |"));
+
+    Serial.println(F("-----------------------------"));
+
+    vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(200)); // print toutes les 200ms
+  }
+}
+
 
 // =====================================================
 // SETUP
 // =====================================================
 void setup()
 {
-    Serial.begin(9600);
-    Wire.begin();
-    myservo.attach(9);
-    myservo.write(70);
+  Serial.begin(9600);
+  Wire.begin();
+  myservo.attach(9);
+  myservo.write(120);
 
-    dataMutex = xSemaphoreCreateMutex();
-    serialMutex = xSemaphoreCreateMutex();
+  // Timer 1 en mode normal pour TCNT1 (1 tick = 62.5ns à 16MHz)
+  TCCR1A = 0x00;
+  TCCR1B = 0x01; // prescaler = 1
 
-    // Création tâches
-    xTaskCreate(Task_LectureSonar, "Sonar", 256, NULL, 2, NULL);
-    xTaskCreate(Task_Calculs, "Calculs", 256, NULL, 3, NULL);
-    xTaskCreate(Task_CommandeServo, "Servo", 256, NULL, 1, NULL);
+  dataMutex = xSemaphoreCreateMutex();
 
-    // Démarrage scheduler
-    vTaskStartScheduler();
+  xTaskCreate(Task_LectureSonar,  "Sonar",   384, NULL, 1, NULL);
+  xTaskCreate(Task_Calculs,       "Calculs", 384, NULL, 3, NULL);
+  xTaskCreate(Task_CommandeServo, "Servo",   384, NULL, 2, NULL);
+  xTaskCreate(Task_Debug,         "Debug",   384, NULL, 1, NULL);
+
+  vTaskStartScheduler();
 }
 
 void loop() {}
