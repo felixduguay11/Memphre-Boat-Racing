@@ -2,12 +2,7 @@
 
 // ============================================================
 //  Config.h  –  Central configuration for RC Hydrofoil
-//  Teensy 4.1
-//
-//  Edit this file only. All components read their settings
-//  from here. No magic numbers anywhere else.
 // ============================================================
-
 
 // ----------------------------------------------------------------
 // ■  PIN MAP
@@ -19,7 +14,13 @@
 
 // --- Sonar HC-SR04 ---
 #define PIN_SONAR_TRIG      14 // fil blanc
-#define PIN_SONAR_ECHO      15 // fil vert 
+#define PIN_SONAR_ECHO      15 // fil vert
+// FUTURE PIN POUR UGT 14 15 16
+// FUTURE PIN POUR I/O 33 34 35
+
+//--- Sonar UGT207 ---
+#define PIN_UGT_ANALOG       16 // fil a determiner
+#define PIN_UGT_IO           35 // fil a determiner 
 
 // --- ESC (PWM) ---
 #define PIN_ESC_LEFT        2 // fil vert
@@ -34,11 +35,11 @@
 #define PIN_FOIL_REAR_RIGHT 7 // fil jaune
 
 // --- FlySky receiver (PWM input, 5 channels used) ---
-#define PIN_RC_CH1          20   // Rudder
+#define PIN_RC_CH1          20   // Direction
 #define PIN_RC_CH3          22   // Throttle
 #define PIN_RC_CH5          24   // Switch A
-#define PIN_RC_CH6          25   // Switch B
-#define PIN_RC_CH7          26   // Switch C
+#define PIN_RC_CH6          25   // Knob VrA
+#define PIN_RC_CH7          26   // Switch D
 
 
 // ----------------------------------------------------------------
@@ -71,6 +72,15 @@
 #define SONAR_MIN_CM        2.0f         // Below = invalid
 #define SONAR_MAX_CM        400.0f       // Above = invalid
 #define SONAR_FILTER_ALPHA  0.25f        // Low-pass: 0=frozen, 1=raw
+
+// ----------------------------------------------------------------
+// ■  SONAR  (UGT)
+// ----------------------------------------------------------------
+
+#define UGT_ADC_RESOLUTION 10 // 10 bit de resolution (0-1023)
+#define UGT_ALPHA          0.1f // facteur alpha de filtrage 
+#define UGT_V_REF          3.0f // tension de reference  
+#define UGT_UPDATE_HZ      10
 
 
 // ----------------------------------------------------------------
@@ -136,7 +146,7 @@
 // 0 = adjustable via knob CH6
 #define HEIGHT_SETPOINT_FIXED  1
 
-#define HEIGHT_SETPOINT_DEFAULT_CM  18.0f
+#define HEIGHT_SETPOINT_DEFAULT_CM  32.0f
 #define HEIGHT_SETPOINT_MIN_CM       5.0f
 #define HEIGHT_SETPOINT_MAX_CM      25.0f
 

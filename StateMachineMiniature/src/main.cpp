@@ -4,6 +4,7 @@
 #include <Config.h>
 #include <MPU6500.h>
 #include <HCSR04.h>
+#include <UGT207.h>
 #include <Receiver.h>
 #include <ESC.h>
 #include <ServoMoteur.h>
@@ -12,7 +13,8 @@
 #include <RollController.h>
 
 IMU              imu;
-Sonar            sonar;
+// Sonar            sonar;
+UGT207           ugt;
 RCReceiver       rc;
 ESC              esc;
 ServoRudder      rudder;
@@ -27,8 +29,10 @@ static uint32_t lastRC        = 0;
 static uint32_t lastControl   = 0;
 static uint32_t lastPrint     = 0;
 static uint32_t lastBlink     = 0;
+static uint32_t lastUGT = 0;
 
-static constexpr uint32_t SONAR_PERIOD_MS   = 1000UL / SONAR_UPDATE_HZ;
+static constexpr uint32_t UGT_PERIOD_MS = 1000UL / UGT_UPDATE_HZ;  // 100 ms
+// static constexpr uint32_t SONAR_PERIOD_MS   = 1000UL / SONAR_UPDATE_HZ;
 static constexpr uint32_t RC_PERIOD_MS      = 20;
 static constexpr uint32_t CONTROL_PERIOD_MS = 50;   
 
@@ -50,8 +54,8 @@ void setup()
     }
     imu.calibrate(IMU_CAL_SAMPLES);
 
-    sonar.begin();
-    sonar.trigger();
+    // sonar.begin();
+    // sonar.trigger();
     lastSonar = millis();
 
     rc.begin();
@@ -83,12 +87,18 @@ void loop()
         imu.update();
     }
 
-    // Sonar at 20 Hz
-    if ((now_ms - lastSonar) >= SONAR_PERIOD_MS) {
-        lastSonar = now_ms;
-        sonar.update();
-        sonar.trigger();
+    if ((now_ms - lastUGT) >= UGT_PERIOD_MS) {
+        lastUGT = now_ms;
+        ugt.update();
     }
+
+
+    // // Sonar at 20 Hz
+    // if ((now_ms - lastSonar) >= SONAR_PERIOD_MS) {
+    //     lastSonar = now_ms;
+    //     sonar.update();
+    //     sonar.trigger();
+    // }
 
     // RC at 50 Hz
     if ((now_ms - lastRC) >= RC_PERIOD_MS) {
@@ -141,10 +151,21 @@ void loop()
                         foils.neutral();
                         break;
 
-                    case RunState::AVANCE:
+                    case RunState::AVANCE: { 
                         esc.set(in.throttle);
-                        foils.neutral();
-                        break;
+                        
+                        // PID roll — differential on rear foils
+                        float rollOut = rollCtrl.update(
+                            imu.getRoll(),
+                            dt
+                        );
+                        float front     = FOIL_ANGLE_NEUTRAL;
+                        float rearLeft  = FOIL_ANGLE_NEUTRAL + rollOut; // 
+                        float rearRight = FOIL_ANGLE_NEUTRAL - rollOut; //
+
+                        foils.set(front, rearLeft, rearRight);
+                        break; 
+                    }
 
                     case RunState::RECULE:
                         esc.set(-in.throttle);
@@ -156,7 +177,7 @@ void loop()
 
                         // PID height — same correction on all 3 foils
                         float heightOut = heightCtrl.update(
-                            sonar.getDistanceCm(),
+                            ugt.getDistanceCm(),
                             rc.knobHeight(),
                             dt
                         );
@@ -184,15 +205,16 @@ void loop()
     if ((now_ms - lastPrint) >= DEBUG_PERIOD_MS) {
         lastPrint = now_ms;
         // sm.printDebug();
-        imu.printDebug();
+        // imu.printDebug();
         // sonar.printDebug();
+        ugt.printDebug();
         // rc.printDebug();
         // esc.printDebug();
         // rudder.printDebug();
-        foils.printDebug();
+        // foils.printDebug();
         if (sm.isControl()) {
             // heightCtrl.printDebug();
-            rollCtrl.printDebug();
+            // rollCtrl.printDebug();
         }
         Serial.println("---");
     }

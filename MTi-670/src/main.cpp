@@ -31,18 +31,3 @@ void loop() {
         //   imu.velocity().vx / vy / vz
       }
 }
-// #include <Arduino.h>
-
-// void setup() {
-//     Serial.begin(115200);
-//     Serial1.begin(115200);
-//     delay(2000);
-//     Serial.println("Listening...");
-// }
-
-// void loop() {
-//     while (Serial1.available()) {
-//         uint8_t b = Serial1.read();
-//         Serial.printf("0x%02X ", b);
-//     }
-// }
