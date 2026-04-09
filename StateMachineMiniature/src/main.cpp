@@ -3,7 +3,7 @@
 #include <Arduino.h>
 #include <Config.h>
 #include <MPU6500.h>
-#include <HCSR04.h>
+// #include <HCSR04.h>
 #include <UGT207.h>
 #include <Receiver.h>
 #include <ESC.h>
@@ -37,7 +37,7 @@ static constexpr uint32_t RC_PERIOD_MS      = 20;
 static constexpr uint32_t CONTROL_PERIOD_MS = 50;   
 
 // Track previous CONTROLE state to reset PIDs on entry
-static bool wasControl = false;
+static RunState lastRunState = RunState::NEUTRE;
 
 void setup()
 {
@@ -124,12 +124,19 @@ void loop()
         sm.update(in);
 
         // Reset PIDs on entry into CONTROLE
-        bool nowControl = sm.isControl();
-        if (nowControl && !wasControl) {
-            heightCtrl.reset();
+        RunState currentRun = sm.getRunState();
+        if (currentRun != lastRunState) {
+        // Reset hauteur seulement — nouvelle référence sonar à chaque entrée
+        heightCtrl.reset();
+        
+        // Reset roll seulement si on revient de RECULE ou NEUTRE
+        // Garder l'intégrale entre AVANCE et CONTROLE
+        if (lastRunState == RunState::RECULE || 
+            lastRunState == RunState::NEUTRE) {
             rollCtrl.reset();
         }
-        wasControl = nowControl;
+        lastRunState = currentRun;
+        }
 
         // Drive actuators
         switch (sm.getTopState()) {
