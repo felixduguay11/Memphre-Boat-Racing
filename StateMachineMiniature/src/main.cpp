@@ -162,10 +162,8 @@ void loop()
                         esc.set(in.throttle);
                         
                         // PID roll — differential on rear foils
-                        float rollOut = rollCtrl.update(
-                            imu.getRoll(),
-                            dt
-                        );
+                        float rollOut = rollCtrl.update(imu.getRoll(), dt);
+                         
                         float front     = FOIL_ANGLE_NEUTRAL;
                         float rearLeft  = FOIL_ANGLE_NEUTRAL + rollOut; // 
                         float rearRight = FOIL_ANGLE_NEUTRAL - rollOut; //
@@ -183,17 +181,10 @@ void loop()
                         esc.set(in.throttle);
 
                         // PID height — same correction on all 3 foils
-                        float heightOut = heightCtrl.update(
-                            ugt.getDistanceCm(),
-                            rc.knobHeight(),
-                            dt
-                        );
+                        float heightOut = heightCtrl.update(ugt.getDistanceCm(), rc.knobHeight(), dt);
 
                         // PID roll — differential on rear foils
-                        float rollOut = rollCtrl.update(
-                            imu.getRoll(),
-                            dt
-                        );
+                        float rollOut = rollCtrl.update(imu.getRoll(), dt);
 
                         // Mix: height lifts all, roll tilts rear
                         float front     = FOIL_ANGLE_NEUTRAL - heightOut;

@@ -150,14 +150,14 @@
 #define HEIGHT_SETPOINT_MIN_CM       5.0f
 #define HEIGHT_SETPOINT_MAX_CM      25.0f
 
-#define HEIGHT_KP    3.25f
-#define HEIGHT_KI    1.25f
-#define HEIGHT_KD    0.75f
+#define HEIGHT_KP    4.0f
+#define HEIGHT_KI    1.75f
+#define HEIGHT_KD    1.5f
 #define HEIGHT_I_MAX 25.0f              // Anti-windup clamp [deg]
 
 
 // ----------------------------------------------------------------
-// ■  ROLL CONTROLLER  (active in CONTROLE state)
+// ■  ROLL CONTROLLER  (active in AVANCE & CONTROLE state)
 // ----------------------------------------------------------------
 #define ROLL_SETPOINT_DEG   0.0f        // Keep wings level
 
