@@ -23,7 +23,7 @@ StateMachine     sm;
 HeightController heightCtrl;
 RollController   rollCtrl;
 
-static uint32_t lastImuUpdate = 0;
+// static uint32_t lastImuUpdate = 0;
 static uint32_t lastSonar     = 0;
 static uint32_t lastRC        = 0;
 static uint32_t lastControl   = 0;
@@ -48,11 +48,11 @@ void setup()
 
     Serial.println("=== RC Hydrofoil – Phase 7 ===");
 
-    if (!imu.begin(IMU_GYRO_RANGE, IMU_ACCEL_RANGE)) {
-        Serial.println("[FATAL] IMU init failed.");
-        while (true) { delay(500); }
-    }
-    imu.calibrate(IMU_CAL_SAMPLES);
+    // if (!imu.begin(IMU_GYRO_RANGE, IMU_ACCEL_RANGE)) {
+    //     Serial.println("[FATAL] IMU init failed.");
+    //     while (true) { delay(500); }
+    // }
+    // imu.calibrate(IMU_CAL_SAMPLES);
 
     // sonar.begin();
     // sonar.trigger();
@@ -71,7 +71,7 @@ void setup()
 
 void loop()
 {
-    uint32_t now_us = micros();
+    // uint32_t now_us = micros();
     uint32_t now_ms = millis();
 
     // Heartbeat LED — fast in RUN, slow in IDLE/STOP
@@ -81,11 +81,11 @@ void loop()
         digitalToggle(LED_BUILTIN);
     }
 
-    // IMU at 500 Hz
-    if ((now_us - lastImuUpdate) >= IMU_PERIOD_US) {
-        lastImuUpdate = now_us;
-        imu.update();
-    }
+    // // IMU at 500 Hz
+    // if ((now_us - lastImuUpdate) >= IMU_PERIOD_US) {
+    //     lastImuUpdate = now_us;
+    //     imu.update();
+    // }
 
     if ((now_ms - lastUGT) >= UGT_PERIOD_MS) {
         lastUGT = now_ms;
@@ -162,11 +162,11 @@ void loop()
                         esc.set(in.throttle);
                         
                         // PID roll — differential on rear foils
-                        float rollOut = rollCtrl.update(imu.getRoll(), dt);
+                        // float rollOut = rollCtrl.update(imu.getRoll(), dt);
                          
                         float front     = FOIL_ANGLE_NEUTRAL;
-                        float rearLeft  = FOIL_ANGLE_NEUTRAL + rollOut; // 
-                        float rearRight = FOIL_ANGLE_NEUTRAL - rollOut; //
+                        float rearLeft  = FOIL_ANGLE_NEUTRAL; // 
+                        float rearRight = FOIL_ANGLE_NEUTRAL; //
 
                         foils.set(front, rearLeft, rearRight);
                         break; 
@@ -184,12 +184,12 @@ void loop()
                         float heightOut = heightCtrl.update(ugt.getDistanceCm(), rc.knobHeight(), dt);
 
                         // PID roll — differential on rear foils
-                        float rollOut = rollCtrl.update(imu.getRoll(), dt);
+                        // float rollOut = rollCtrl.update(imu.getRoll(), dt);
 
                         // Mix: height lifts all, roll tilts rear
                         float front     = FOIL_ANGLE_NEUTRAL - heightOut;
-                        float rearLeft  = FOIL_ANGLE_NEUTRAL - heightOut + rollOut; // 
-                        float rearRight = FOIL_ANGLE_NEUTRAL - heightOut - rollOut; //
+                        float rearLeft  = FOIL_ANGLE_NEUTRAL + heightOut; // 
+                        float rearRight = FOIL_ANGLE_NEUTRAL - heightOut; //
 
                         foils.set(front, rearLeft, rearRight);
                         break;

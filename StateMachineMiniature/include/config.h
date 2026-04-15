@@ -19,8 +19,8 @@
 // FUTURE PIN POUR I/O 33 34 35
 
 //--- Sonar UGT207 ---
-#define PIN_UGT_ANALOG       16 // fil a determiner
-#define PIN_UGT_IO           35 // fil a determiner 
+#define PIN_UGT_ANALOG       16 // fil blanc
+#define PIN_UGT_IO           35 // fil vert 
 
 // --- ESC (PWM) ---
 #define PIN_ESC_LEFT        2 // fil vert
@@ -54,7 +54,7 @@
 #define IMU_ACCEL_RANGE     AccelRange::G4
 
 // Complementary filter: 0 = pure gyro, 1 = pure accel
-#define IMU_ALPHA           0.02f
+#define IMU_ALPHA           0.125f
 
 // Static calibration sample count (sensor must be still)
 #define IMU_CAL_SAMPLES     500
@@ -78,7 +78,7 @@
 // ----------------------------------------------------------------
 
 #define UGT_ADC_RESOLUTION 10 // 10 bit de resolution (0-1023)
-#define UGT_ALPHA          0.1f // facteur alpha de filtrage 
+#define UGT_ALPHA          0.5f // facteur alpha de filtrage 
 #define UGT_V_REF          3.0f // tension de reference  
 #define UGT_UPDATE_HZ      10
 
@@ -146,13 +146,13 @@
 // 0 = adjustable via knob CH6
 #define HEIGHT_SETPOINT_FIXED  1
 
-#define HEIGHT_SETPOINT_DEFAULT_CM  32.0f
+#define HEIGHT_SETPOINT_DEFAULT_CM  32.5f
 #define HEIGHT_SETPOINT_MIN_CM       5.0f
 #define HEIGHT_SETPOINT_MAX_CM      25.0f
 
 #define HEIGHT_KP    4.0f
 #define HEIGHT_KI    1.75f
-#define HEIGHT_KD    1.5f
+#define HEIGHT_KD    1.25f
 #define HEIGHT_I_MAX 25.0f              // Anti-windup clamp [deg]
 
 
@@ -161,10 +161,10 @@
 // ----------------------------------------------------------------
 #define ROLL_SETPOINT_DEG   0.0f        // Keep wings level
 
-#define ROLL_KP    2.0f
-#define ROLL_KI    0.750f
+#define ROLL_KP    3.0f
+#define ROLL_KI    1.250f
 #define ROLL_KD    0.25f
-#define ROLL_I_MAX 15.0f                // Anti-windup clamp [deg]
+#define ROLL_I_MAX 20.0f                // Anti-windup clamp [deg]
 
 
 // ----------------------------------------------------------------
