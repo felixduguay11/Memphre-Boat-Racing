@@ -1,23 +1,38 @@
 #include "MTi670.h"
 
-// ─── Constructor / begin ──────────────────────────────────────────────────────
+// ─── Constructor ──────────────────────────────────────────────────────────────
 
 MTi670::MTi670(HardwareSerial& serial, uint32_t baud)
     : _serial(serial), _baud(baud) {}
 
-void MTi670::begin() {
+// ─── begin() — boot sequence ──────────────────────────────────────────────────
+
+void MTi670::begin(uint32_t timeoutMs) {
     _serial.begin(_baud);
+    while (_serial.available()) _serial.read();  // flush
 
-    // Wait for serial to be ready
-    delay(100);
+    Serial.println("[MTi670] Waiting for MTi...");
 
-    // Flush any garbage on the line
-    while (_serial.available()) _serial.read();
+    uint32_t start   = millis();
+    uint32_t lastCmd = 0;
 
-    // Send GoToMeasurement — retry several times to handle slow boot
-    for (int i = 0; i < 5; i++) {
+    // Exit as soon as we get WakeUp OR MTData2 (already measuring)
+    // Send GoToMeasurement every 500ms as fallback
+    while (!_gotWakeUp && !_newData && (millis() - start < timeoutMs)) {
+        while (_serial.available()) feedByte((uint8_t)_serial.read());
+        if (millis() - lastCmd > 500) {
+            sendMsg(MID_GOTOMEASURE);
+            lastCmd = millis();
+        }
+    }
+
+    if (_newData) {
+        Serial.println("[MTi670] Already measuring — ready.");
+    } else if (_gotWakeUp) {
+        Serial.println("[MTi670] WakeUp received — ready.");
+    } else {
+        Serial.println("[MTi670] Timeout — sending GoToMeasurement.");
         sendMsg(MID_GOTOMEASURE);
-        delay(200);
     }
 }
 
@@ -41,11 +56,14 @@ void MTi670::goToMeasurement() {
 
 void MTi670::printData() const {
     if (_att.valid) {
-        Serial.printf("Roll: %6.2f  Pitch: %6.2f  Yaw: %6.2f  deg\n",
+        Serial.printf("Roll: %6.2f  Pitch: %6.2f  Yaw: %6.2f deg\n",
             _att.roll, _att.pitch, _att.yaw);
     }
     if (_pos.valid) {
         Serial.printf("Lat: %.7f  Lon: %.7f\n", _pos.lat, _pos.lon);
+    }
+    if (_pos.altValid) {
+        Serial.printf("Alt: %.2f m\n", _pos.altitude);
     }
     if (_vel.valid) {
         Serial.printf("Speed: %.2f m/s  (vx:%.2f  vy:%.2f  vz:%.2f)\n",
@@ -53,7 +71,7 @@ void MTi670::printData() const {
     }
 }
 
-// ─── XBUS send ────────────────────────────────────────────────────────────────
+// ─── sendMsg() ────────────────────────────────────────────────────────────────
 
 void MTi670::sendMsg(uint8_t mid) {
     uint8_t msg[5];
@@ -61,7 +79,7 @@ void MTi670::sendMsg(uint8_t mid) {
     msg[1] = XBUS_BID;
     msg[2] = mid;
     msg[3] = 0x00;
-    msg[4] = checksum(&msg[2], 2);
+    msg[4] = checksum(&msg[1], 3);  // BID + MID + LEN
     _serial.write(msg, 5);
 }
 
@@ -85,7 +103,11 @@ void MTi670::feedByte(uint8_t b) {
 
         case State::WAIT_BID:
             _pkt[_pktIdx++] = b;
-            _state = (b == XBUS_BID) ? State::WAIT_MID : State::WAIT_PRE;
+            if (b == XBUS_BID) {
+                _state = State::WAIT_MID;
+            } else {
+                _state = State::WAIT_PRE;
+            }
             break;
 
         case State::WAIT_MID:
@@ -112,7 +134,7 @@ void MTi670::feedByte(uint8_t b) {
             if (sum == 0x00) {
                 processPacket();
             } else {
-                Serial.printf("[MTi670] Checksum error (sum=0x%02X len=%d MID=0x%02X)\n", sum, _pktIdx, _mid);
+                Serial.printf("[MTi670] Checksum error (sum=0x%02X MID=0x%02X)\n", sum, _mid);
             }
             _state = State::WAIT_PRE;
             break;
@@ -125,8 +147,13 @@ void MTi670::feedByte(uint8_t b) {
 void MTi670::processPacket() {
     switch (_mid) {
         case MID_WAKEUP:
-            Serial.println("[MTi670] WakeUp — sending GoToMeasurement");
+            Serial.println("[MTi670] WakeUp received");
+            _gotWakeUp = true;
             sendMsg(MID_GOTOMEASURE);
+            break;
+
+        case MID_GOTOMEASURE_ACK:
+            Serial.println("[MTi670] GoToMeasurement ACK — streaming started");
             break;
 
         case MID_MTDATA2:
@@ -134,15 +161,17 @@ void MTi670::processPacket() {
             _newData = true;
             break;
 
+        case 0x31:  // GoToConfig ACK — MTi reset into config mode
+            Serial.println("[MTi670] Config mode — sending GoToMeasurement");
+            sendMsg(MID_GOTOMEASURE);
+            break;
+
         case MID_ERROR:
             Serial.printf("[MTi670] Error: 0x%02X\n", _pkt[4]);
             break;
 
         default:
-            // Respond to any other message with GoToMeasurement
-            // in case device is in config mode
-            Serial.printf("[MTi670] MID: 0x%02X — sending GoToMeasurement\n", _mid);
-            sendMsg(MID_GOTOMEASURE);
+            Serial.printf("[MTi670] Unknown MID: 0x%02X\n", _mid);
             break;
     }
 }
@@ -172,6 +201,13 @@ void MTi670::parseMTData2(uint8_t* p, uint8_t plen) {
                     _pos.lat   = beDouble(d);
                     _pos.lon   = beDouble(d + 8);
                     _pos.valid = true;
+                }
+                break;
+
+            case XDA_ALT:
+                if (len >= 4) {
+                    _pos.altitude = beFloat(d);
+                    _pos.altValid = true;
                 }
                 break;
 

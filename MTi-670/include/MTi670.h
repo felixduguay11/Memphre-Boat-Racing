@@ -2,16 +2,18 @@
 #include <Arduino.h>
 
 // ─── XBUS Constants ───────────────────────────────────────────────────────────
-#define XBUS_PREAMBLE    0xFA
-#define XBUS_BID         0xFF
-#define MID_WAKEUP       0x3E
-#define MID_GOTOMEASURE  0x10
-#define MID_MTDATA2      0x36
-#define MID_ERROR        0x42
+#define XBUS_PREAMBLE       0xFA
+#define XBUS_BID            0xFF
+#define MID_WAKEUP          0x3E
+#define MID_GOTOMEASURE     0x10
+#define MID_GOTOMEASURE_ACK 0x11
+#define MID_MTDATA2         0x36
+#define MID_ERROR           0x42
 
 // ─── XDA Identifiers ─────────────────────────────────────────────────────────
 #define XDA_EULER_ANGLES 0x2030  // Roll, Pitch, Yaw (float32, deg)
 #define XDA_LAT_LON      0x5020  // Latitude, Longitude (float64, deg)
+#define XDA_ALT          0x5030  // Altitude ellipsoid (float32, m)
 #define XDA_VELOCITY_XYZ 0xD010  // Velocity NED (float32, m/s)
 
 // ─── Data Structs ─────────────────────────────────────────────────────────────
@@ -22,7 +24,9 @@ struct MTiAttitude {
 
 struct MTiPosition {
     double lat, lon;          // degrees
-    bool   valid = false;
+    float  altitude;          // metres
+    bool   valid    = false;
+    bool   altValid = false;
 };
 
 struct MTiVelocity {
@@ -36,8 +40,11 @@ class MTi670 {
 public:
     MTi670(HardwareSerial& serial, uint32_t baud = 115200);
 
-    void begin();           // call in setup()
-    bool update();          // call in loop() — returns true on new packet
+    // Call in setup() — blocks until WakeUp received or timeout
+    void begin(uint32_t timeoutMs = 5000);
+
+    // Call in loop() — returns true on new packet
+    bool update();
 
     const MTiAttitude& attitude() const { return _att; }
     const MTiPosition& position() const { return _pos; }
@@ -54,13 +61,16 @@ private:
     MTiPosition _pos;
     MTiVelocity _vel;
 
+    bool _gotWakeUp = false;
+    bool _gotAck    = false;
+    bool _newData   = false;
+
     enum class State { WAIT_PRE, WAIT_BID, WAIT_MID, WAIT_LEN, WAIT_DATA, WAIT_CHK };
     State   _state   = State::WAIT_PRE;
     uint8_t _pkt[512];
     int     _pktIdx  = 0;
     uint8_t _mid     = 0;
     uint8_t _len     = 0;
-    bool    _newData = false;
 
     void    feedByte(uint8_t b);
     void    processPacket();

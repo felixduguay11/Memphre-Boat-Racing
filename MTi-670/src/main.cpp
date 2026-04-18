@@ -2,32 +2,40 @@
 #include "MTi670.h"
 
 // Serial1 = RX pin 0, TX pin 1 on Teensy 4.1
-MTi670 imu(Serial1, 115200);
+MTi670 imu(Serial8, 115200);
 
 void setup() {
     Serial.begin(115200);
-
-    delay(10000);
-    Serial.println("[Setup] Starting MTi-670...");
-    imu.begin();
+    // No delay — listen for WakeUp immediately
+    imu.begin(5000);
     Serial.println("[Setup] Done.");
-
 }
 
 void loop() {
-
     if (imu.update()) {
-          imu.printData();
-
-          // ── Use values directly ───────────────────────────────────────────────
-          imu.attitude().roll;
-          imu.attitude().pitch;
-          imu.attitude().yaw;
-
-          imu.position().lat;
-          imu.position().lon;
-
-          imu.velocity().speed; // horizontal speed (m/s)
-        //   imu.velocity().vx / vy / vz
-      }
+        imu.printData();
+    }
+    
+    // // Debug temporaire
+    // static uint32_t last = 0;
+    // if (millis() - last > 1000) {
+    //     Serial.printf("att:%d pos:%d vel:%d\n", 
+    //         imu.attitude().valid,
+    //         imu.position().valid, 
+    //         imu.velocity().valid);
+    //     last = millis();
+    // }
 }
+// #include <Arduino.h>
+
+// void setup() {
+//     Serial.begin(115200);
+//     Serial8.begin(115200);
+//     Serial.println("Listening...");
+// }
+
+// void loop() {
+//     while (Serial8.available()) {
+//         Serial.printf("0x%02X ", Serial8.read());
+//     }
+// }
