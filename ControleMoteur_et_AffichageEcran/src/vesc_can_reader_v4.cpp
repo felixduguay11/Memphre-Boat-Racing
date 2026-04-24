@@ -331,7 +331,7 @@ void maintainControl(int id, unsigned long &lastSendRef) {
   }
 }
 
-// À appeler dans loop() toutes les ~100 ms
+// À appeler dans loop() selon COMM_RATE
 void sendSensorsToScreen() {
   
   float gpsSpeed = 0; // Remplacez par la vraie vitesse GPS
