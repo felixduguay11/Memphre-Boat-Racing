@@ -1,0 +1,9 @@
+[submodule "Integration taille reel/lib/freertos-teensy"]
+	path = Integration taille reel/lib/freertos-teensy
+	url = https://github.com/felixduguay11/freertos-teensy.git
+[submodule "Integration taille reel/lib/PWMServo"]
+	path = Integration taille reel/lib/PWMServo
+	url = https://github.com/felixduguay11/PWMServo.git
+[submodule "Integration taille reel/platform/platform-teensy"]
+	path = Integration taille reel/platform/platform-teensy
+	url = https://github.com/felixduguay11/platform-teensy.git
