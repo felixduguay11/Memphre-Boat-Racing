@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<title>Hydrofoil Dashboard</title>
+
+<link rel="stylesheet" href="/static/style.css">
+
+<script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+
+</head>
+
+<body>
+
+<div id="clock"></div>
+
+<div id="menu">
+
+<button onclick="showPage('setup')">Setup</button>
+<button onclick="showPage('principal')">Principal</button>
+<button onclick="showPage('control')">Contrôle</button>
+<button onclick="showPage('motor')">Moteur</button>
+
+</div>
+
+<!-- PAGE SETUP -->
+
+<div class="page" id="setup">
+
+<h1>MODE</h1>
+
+<div class="buttons">
+
+<button>Faible</button>
+<button>Moyen</button>
+<button>Fort</button>
+
+</div>
+
+<div class="pid">
+
+<label>P</label>
+<input id="p">
+
+<label>I</label>
+<input id="i">
+
+<label>D</label>
+<input id="d">
+
+</div>
+
+<div class="buttons">
+
+<button>Asservissement</button>
+<button>Hydrofoils Fixes</button>
+<button>Pas d'hydrofoils</button>
+
+</div>
+
+</div>
+
+
+<!-- PAGE PRINCIPAL -->
+
+<div class="page" id="principal">
+
+<div class="center">
+
+<div class="speed" id="speed">0 km/h</div>
+
+<div class="power">Pout : <span id="power">0</span> kW</div>
+
+<div class="eff">Efficacité : <span id="eff">0</span> %</div>
+
+</div>
+
+<div class="battery">
+
+Charge : <span id="charge">0</span>% <br>
+<span id="kwh">0</span> kWh <br>
+
+Output : <span id="bout">0</span> kW <br>
+
+Temps restant : <span id="time">0</span>
+
+</div>
+
+<div class="temps">
+
+MOSFET1 : <span id="t1"></span><br>
+MOSFET2 : <span id="t2"></span>
+
+</div>
+
+<div class="state" id="state">RUN</div>
+
+</div>
+
+
+<!-- PAGE CONTROLE -->
+
+<div class="page" id="control">
+
+<h2>IMU</h2>
+
+Roll : <span id="roll"></span><br>
+Pitch : <span id="pitch"></span><br>
+Yaw : <span id="yaw"></span>
+
+<h2>SONAR</h2>
+
+Avant : <span id="sonar1"></span><br>
+AR Ga : <span id="sonar2"></span><br>
+AR Dr : <span id="sonar3"></span>
+
+<h2>SERVOS</h2>
+
+Avant : <span id="servo1"></span><br>
+AR Ga : <span id="servo2"></span><br>
+AR Dr : <span id="servo3"></span>
+
+<div class="state" id="state2">RUN</div>
+
+</div>
+
+
+<!-- PAGE MOTEUR -->
+
+<div class="page" id="motor">
+
+<h2>ESC 1</h2>
+
+Vin : <span id="vin1"></span><br>
+Iin : <span id="iin1"></span><br>
+RPM : <span id="rpm1"></span>
+
+<h2>ESC 2</h2>
+
+Vin : <span id="vin2"></span><br>
+Iin : <span id="iin2"></span><br>
+RPM : <span id="rpm2"></span>
+
+</div>
+
+<script src="/static/app.js"></script>
+
+</body>
+
+</html>
