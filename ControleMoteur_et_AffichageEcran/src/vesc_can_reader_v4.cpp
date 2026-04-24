@@ -130,7 +130,7 @@ void loop() {
   }
 }
 
-
+// Print dans le serial les valeurs des ESCs
 void printVescValuesSerial(int id) {
   Serial.print("\n==================================================================================================================================\n");
   Serial.printf("[ESC %u] eRPM=%-8ld  I=%.2f A  Duty=%.1f%%  "
