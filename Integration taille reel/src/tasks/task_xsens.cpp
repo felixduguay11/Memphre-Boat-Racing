@@ -1,33 +1,17 @@
-#include "task_imu.h"
+#include "task_xsens.h"
 
-// =====================================================
-// Définition de la variable partagée
-// déclarée extern dans task_imu.h
-// =====================================================
-IMUData g_imu = {
-    .roll      = 0.0f,
-    .pitch     = 0.0f,
-    .yaw       = 0.0f,
-    .vx        = 0.0f,
-    .vy        = 0.0f,
-    .vz        = 0.0f,
-    .speed     = 0.0f,
-    .lat       = 0.0,
-    .lon       = 0.0,
-    .att_valid = false,
-    .vel_valid = false,
-    .pos_valid = false,
-    .temps_us  = 0.0f
-};
-
-// Mutex défini dans main.cpp
 extern SemaphoreHandle_t dataMutex;
+static MTi670 s_mti(Serial5, BAUD_Xsens);
 
-// Instance du driver — Serial5 = pins 21(RX) / 20(TX) sur Teensy 4.1
-static MTi670 s_mti(Serial5, IMU_BAUDRATE);
+XsensData Xsens_data = {
+    .roll = 0.0f, .pitch = 0.0f, .yaw = 0.0f, .att_valid = false,
+    .lat = 0.0,   .lon = 0.0,
+    .altitude = 0.0f, .pos_valid = false, .alt_valid = false,
+    .vx = 0.0f, .vy = 0.0f, .vz = 0.0f, .speed = 0.0f, .vel_valid = false,
+    .temps_us = 0.0f
+};
+float Xsens_temps_us = 0.0f;
 
-
-// ─── Constructor / begin ──────────────────────────────────────────────────────
 
 MTi670::MTi670(HardwareSerial& serial, uint32_t baud)
     : _serial(serial), _baud(baud) {}
@@ -35,27 +19,31 @@ MTi670::MTi670(HardwareSerial& serial, uint32_t baud)
 void MTi670::begin()
 {
     _serial.begin(_baud);
-    delay(100);
-    while (_serial.available()) _serial.read();  // flush
 
-    for (int i = 0; i < 5; i++) {
-        sendMsg(MID_GOTOMEASURE);
-        delay(200);
+    // Flush du buffer UART — limité pour éviter blocage
+    int flushCount = 0;
+    while (_serial.available() && flushCount < 256) {
+        _serial.read();
+        flushCount++;
     }
 }
 
-// ─── update() ────────────────────────────────────────────────────────────────
+void MTi670::requestMeasurement()
+{
+    sendMsg(MID_GOTOMEASURE);
+}
 
 bool MTi670::update()
 {
     _newData = false;
-    while (_serial.available()) {
+
+    int count = 0;
+    while (_serial.available() && count < XSENS_MAX_BYTES_PER_UPDATE) {
         feedByte((uint8_t)_serial.read());
+        count++;
     }
     return _newData;
 }
-
-// ─── XBUS send ────────────────────────────────────────────────────────────────
 
 void MTi670::sendMsg(uint8_t mid)
 {
@@ -64,7 +52,7 @@ void MTi670::sendMsg(uint8_t mid)
     msg[1] = XBUS_BID;
     msg[2] = mid;
     msg[3] = 0x00;
-    msg[4] = checksum(&msg[2], 2);
+    msg[4] = checksum(&msg[1], 3);
     _serial.write(msg, 5);
 }
 
@@ -74,8 +62,6 @@ uint8_t MTi670::checksum(const uint8_t* data, int len) const
     for (int i = 0; i < len; i++) sum += data[i];
     return (uint8_t)(0x100 - sum);
 }
-
-// ─── Machine d'états XBUS ────────────────────────────────────────────────────
 
 void MTi670::feedByte(uint8_t b)
 {
@@ -121,27 +107,28 @@ void MTi670::feedByte(uint8_t b)
     }
 }
 
-// ─── Dispatch paquet ──────────────────────────────────────────────────────────
-
 void MTi670::processPacket()
 {
     switch (_mid) {
         case MID_WAKEUP:
+            _gotWakeUp = true;
             sendMsg(MID_GOTOMEASURE);
+            break;
+        case MID_GOTOMEASURE_ACK:
             break;
         case MID_MTDATA2:
             parseMTData2(&_pkt[4], _len);
             _newData = true;
             break;
+        case 0x31:
+            sendMsg(MID_GOTOMEASURE);
+            break;
         case MID_ERROR:
             break;
         default:
-            sendMsg(MID_GOTOMEASURE);
             break;
     }
 }
-
-// ─── Parseur MTData2 / XDA ───────────────────────────────────────────────────
 
 void MTi670::parseMTData2(uint8_t* p, uint8_t plen)
 {
@@ -161,7 +148,6 @@ void MTi670::parseMTData2(uint8_t* p, uint8_t plen)
                     _att_valid = true;
                 }
                 break;
-
             case XDA_LAT_LON:
                 if (len >= 16) {
                     _lat       = beDouble(d);
@@ -169,7 +155,12 @@ void MTi670::parseMTData2(uint8_t* p, uint8_t plen)
                     _pos_valid = true;
                 }
                 break;
-
+            case XDA_ALT:
+                if (len >= 4) {
+                    _altitude  = beFloat(d);
+                    _alt_valid = true;
+                }
+                break;
             case XDA_VELOCITY_XYZ:
                 if (len >= 12) {
                     _vx        = beFloat(d);
@@ -182,8 +173,6 @@ void MTi670::parseMTData2(uint8_t* p, uint8_t plen)
         }
     }
 }
-
-// ─── Helpers big-endian ───────────────────────────────────────────────────────
 
 float MTi670::beFloat(const uint8_t* p)
 {
@@ -201,20 +190,25 @@ double MTi670::beDouble(const uint8_t* p)
     double d; memcpy(&d, &u, 8); return d;
 }
 
-
-// =====================================================
-// Task_IMU — priorité 3, période 10ms (100Hz)
-//
-// Task_IMU est friend de MTi670 → accès direct aux
-// membres privés _roll, _pitch, etc. sans passer
-// par des méthodes publiques
-// =====================================================
-void Task_IMU(void *ptr)
+void Task_Xsens(void *ptr)
 {
     (void) ptr;
-    TickType_t lastWakeTime = xTaskGetTickCount();
 
     s_mti.begin();
+
+    const int MAX_INIT_TRIES = 10;  // 10 × 500ms = 5s max
+
+    for (int i = 0; i < MAX_INIT_TRIES; i++)
+    {
+        s_mti.update();
+        if (s_mti.isReady()) break;
+
+        s_mti.requestMeasurement();
+        vTaskDelay(pdMS_TO_TICKS(500));  // ← libère le CPU
+    }
+
+    // --- Boucle principale ---
+    TickType_t lastWakeTime = xTaskGetTickCount();
 
     while (1)
     {
@@ -228,32 +222,38 @@ void Task_IMU(void *ptr)
         {
             if (xSemaphoreTake(dataMutex, portMAX_DELAY))
             {
-                // Accès direct aux membres privés via friend
-                g_imu.att_valid = s_mti._att_valid;
-                g_imu.vel_valid = s_mti._vel_valid;
-                g_imu.pos_valid = s_mti._pos_valid;
-
+                Xsens_data.att_valid = s_mti._att_valid;
                 if (s_mti._att_valid) {
-                    g_imu.roll  = s_mti._roll;
-                    g_imu.pitch = s_mti._pitch;
-                    g_imu.yaw   = s_mti._yaw;
-                }
-                if (s_mti._vel_valid) {
-                    g_imu.vx    = s_mti._vx;
-                    g_imu.vy    = s_mti._vy;
-                    g_imu.vz    = s_mti._vz;
-                    g_imu.speed = s_mti._speed;
-                }
-                if (s_mti._pos_valid) {
-                    g_imu.lat = s_mti._lat;
-                    g_imu.lon = s_mti._lon;
+                    Xsens_data.roll  = s_mti._roll;
+                    Xsens_data.pitch = s_mti._pitch;
+                    Xsens_data.yaw   = s_mti._yaw;
                 }
 
-                g_imu.temps_us = duree_us;
+                Xsens_data.pos_valid = s_mti._pos_valid;
+                Xsens_data.alt_valid = s_mti._alt_valid;
+                if (s_mti._pos_valid) {
+                    Xsens_data.lat = s_mti._lat;
+                    Xsens_data.lon = s_mti._lon;
+                }
+                if (s_mti._alt_valid) {
+                    Xsens_data.altitude = s_mti._altitude;
+                }
+
+                Xsens_data.vel_valid = s_mti._vel_valid;
+                if (s_mti._vel_valid) {
+                    Xsens_data.vx    = s_mti._vx;
+                    Xsens_data.vy    = s_mti._vy;
+                    Xsens_data.vz    = s_mti._vz;
+                    Xsens_data.speed = s_mti._speed;
+                }
+
+                Xsens_data.temps_us = duree_us;
+                Xsens_temps_us      = duree_us;
+
                 xSemaphoreGive(dataMutex);
             }
         }
 
-        vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(PERIODE_IMU_MS));
+        vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(PERIODE_Xsens_MS));
     }
 }

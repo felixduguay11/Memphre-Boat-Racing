@@ -1,70 +1,26 @@
 #include "task_sonar.h"
 
-// =====================================================
-// Définition des variables partagées
-// déclarées extern dans task_sonar.h
-// =====================================================
-float g_distance       = 0.0f;
-float g_temps_sonar_us = 0.0f;
-
-// Filtre interne — propre à cette tâche, non partagé
-// Task_Controle a le sien dans main.cpp
-static float s_distance_filt = 70.0f;
-
-// Mutex défini dans main.cpp
+// Mutex
 extern SemaphoreHandle_t dataMutex;
 
-
-// =====================================================
-// lire_sonar()
-//
-// Étapes :
-//   1. Lecture brute ADC (12 bits)
-//   2. ADC → tension (V)
-//   3. Tension → courant (mA) via loi d'Ohm : I = V / R
-//   4. Courant → distance (cm) par interpolation linéaire
-//   5. Filtre passe-bas exponentiel
-//   6. Contrainte physique [DIST_MIN_CM, DIST_MAX_CM]
-//
-// filt : référence vers le filtre de l'appelant
-// =====================================================
-float lire_sonar(int pin, float &filt)
+// Fonction lecture de sonar
+float lire_sonar(int pin, float &dist_filt)
 {
-  // Étape 1 — Lecture brute ADC
   int raw = analogRead(pin);
+  float voltage = (raw / SONAR_ADC_BITS) * SONAR_VREF;
+  float courant_mA = (voltage / SONAR_RESISTANCE) * 1000.0f;
+  float newDist = (courant_mA - SONAR_I_MIN_MA) / (SONAR_I_MAX_MA - SONAR_I_MIN_MA)
+                  * (SONAR_DIST_MAX_CM - SONAR_DIST_MIN_CM) + SONAR_DIST_MIN_CM;
 
-  // Étape 2 — ADC → tension (V)
-  float voltage = (raw / ADC_BITS) * VREF;
+  dist_filt = SONAR_ALPHA * newDist + (1.0f - SONAR_ALPHA) * dist_filt;
 
-  // Étape 3 — Tension → courant (mA)
-  float courant_mA = (voltage / R_SHUNT) * 1000.0f;
+  if (dist_filt < SONAR_DIST_MIN_CM) dist_filt = SONAR_DIST_MIN_CM;
+  if (dist_filt > SONAR_DIST_MAX_CM) dist_filt = SONAR_DIST_MAX_CM;
 
-  // Étape 4 — Courant → distance (cm)
-  //   4mA  = DIST_MIN_CM (20cm)
-  //   20mA = DIST_MAX_CM (200cm)
-  float newDist = (courant_mA - I_MIN_MA) / (I_MAX_MA - I_MIN_MA)
-                  * (DIST_MAX_CM - DIST_MIN_CM) + DIST_MIN_CM;
-
-  // Étape 5 — Filtre passe-bas exponentiel
-  filt = ALPHA_SONAR * newDist + (1.0f - ALPHA_SONAR) * filt;
-
-  // Étape 6 — Contrainte physique du capteur
-  if (filt < DIST_MIN_CM) filt = DIST_MIN_CM;
-  if (filt > DIST_MAX_CM) filt = DIST_MAX_CM;
-
-  return filt;
+  return dist_filt;
 }
 
-
-// =====================================================
-// Task_LectureSonar — priorité 2, période 20ms
-//
-// Rôle : lire le sonar et mettre à jour g_distance
-//        pour la tâche debug (affichage uniquement)
-//
-// Note : Task_Controle lit aussi le sonar via lire_sonar()
-//        avec son propre filtre — cette tâche est pour debug
-// =====================================================
+// Tache de lecture des sonars
 void Task_LectureSonar(void *ptr)
 {
   (void) ptr;
@@ -74,14 +30,21 @@ void Task_LectureSonar(void *ptr)
   {
     uint32_t t_debut = micros();
 
-    float dist = lire_sonar(PIN_SONAR, s_distance_filt);
+    float dist[NB_CANAUX];
+
+    for(int i=0; i<NB_CANAUX; i++){
+      dist[i] = lire_sonar(PINS_SONARS[i], distance_filt[i]);
+      distance_filt[i] = dist[i];
+    }
 
     float duree_us = (float)(micros() - t_debut);
 
     if (xSemaphoreTake(dataMutex, portMAX_DELAY))
     {
-      g_distance       = dist;
-      g_temps_sonar_us = duree_us;
+      for(int i=0; i<NB_CANAUX; i++){
+        Sonar_distance[i] = dist[i];
+      }
+      Sonar_temps_us = duree_us;
       xSemaphoreGive(dataMutex);
     }
 

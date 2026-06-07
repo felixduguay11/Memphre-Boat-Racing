@@ -23,21 +23,46 @@ void Task_RPi(void *ptr)
     uint32_t t_debut = micros();
 
     // --- Copie locale de toutes les données sous mutex ---
-    float    dist    = 0.0f;
-    float    output  = 0.0f;
-    float    cmd     = 0.0f;
-    float    t_sonar = 0.0f;
-    float    t_ctrl  = 0.0f;
-    IMUData  imu;
+    float    dist_avant           = 0.0f;
+    float    dist_arriere_gauche  = 0.0f;
+    float    dist_arriere_droit   = 0.0f;
+
+    float    output_avant         = 0.0f;
+    float    output_arriere_gauche= 0.0f;
+    float    output_arriere_droit = 0.0f;
+
+    float    cmd_avant            = 0.0f;
+    float    cmd_arriere_gauche   = 0.0f;
+    float    cmd_arriere_droit    = 0.0f;
+
+    float    temps_tache_sonar    = 0.0f;
+    float    temps_tache_H_ctrl   = 0.0f;
+
+    float    roll                 = 0.0f;
+    float    pitch                = 0.0f;
+    float    yaw                  = 0.0f;
 
     if (xSemaphoreTake(dataMutex, portMAX_DELAY))
     {
-      dist    = g_distance;
-      output  = g_output_pid;
-      cmd     = g_cmd_servo;
-      t_sonar = g_temps_sonar_us;
-      t_ctrl  = g_temps_controle_us;
-      imu     = g_imu;
+      dist_avant            = Sonar_distance[0];
+      dist_arriere_gauche   = Sonar_distance[1];
+      dist_arriere_droit    = Sonar_distance[2];
+
+      output_avant          = H_outputs[0];
+      output_arriere_gauche = H_outputs[1];
+      output_arriere_droit  = H_outputs[2];
+
+      cmd_avant             = H_cmd_servos[0];
+      cmd_arriere_gauche    = H_cmd_servos[1];
+      cmd_arriere_droit     = H_cmd_servos[2];
+
+      temps_tache_sonar     = Sonar_temps_us;
+      temps_tache_H_ctrl    = H_control_time_us;
+
+      roll                  = Xsens_data.roll;
+      pitch                 = Xsens_data.pitch;
+      yaw                   = Xsens_data.yaw;
+
       xSemaphoreGive(dataMutex);
     }
 
@@ -47,53 +72,27 @@ void Task_RPi(void *ptr)
 
     // --- Sonar ---
     Serial.print("[Sonar]    ");
-    Serial.print(t_sonar, 1);
+    Serial.print(temps_tache_sonar, 1);
     Serial.print(" us  |  Dist=");
-    Serial.print(dist, 1);
+    Serial.print(dist_avant, 1);
     Serial.println(" cm");
 
     // --- Controle foils ---
     Serial.print("[Foils]    ");
-    Serial.print(t_ctrl, 1);
+    Serial.print(temps_tache_H_ctrl, 1);
     Serial.print(" us  |  Erreur=");
-    Serial.print(DISTANCE_REF_CM - dist, 2);
+    Serial.print(H_DISTANCE_REF_AVANT - dist_avant, 2);
     Serial.print("  Output=");
-    Serial.print(output, 2);
+    Serial.print(output_avant, 2);
     Serial.print("  Cmd=");
-    Serial.println(cmd, 1);
+    Serial.println(cmd_avant, 1);
 
     // --- IMU attitude ---
-    Serial.print("[IMU]      ");
-    Serial.print(imu.temps_us, 1);
-    Serial.print(" us  |  ");
-    if (imu.att_valid) {
-      Serial.print("Roll=");    Serial.print(imu.roll,  2);
-      Serial.print("  Pitch="); Serial.print(imu.pitch, 2);
-      Serial.print("  Yaw=");   Serial.print(imu.yaw,   2);
-      Serial.println(" deg");
-    } else {
-      Serial.println("attitude invalide");
-    }
-
-    // --- IMU vitesse ---
-    Serial.print("[Vitesse]          |  ");
-    if (imu.vel_valid) {
-      Serial.print("Speed="); Serial.print(imu.speed, 2);
-      Serial.print(" m/s  vx="); Serial.print(imu.vx, 2);
-      Serial.print("  vy=");     Serial.print(imu.vy, 2);
-      Serial.print("  vz=");     Serial.println(imu.vz, 2);
-    } else {
-      Serial.println("vitesse invalide");
-    }
-
-    // --- GPS ---
-    Serial.print("[GPS]              |  ");
-    if (imu.pos_valid) {
-      Serial.print("Lat="); Serial.print(imu.lat, 7);
-      Serial.print("  Lon="); Serial.println(imu.lon, 7);
-    } else {
-      Serial.println("position invalide");
-    }
+    Serial.print("[Xsens]      ");
+    Serial.print("Roll=");    Serial.print(roll,  1);
+    Serial.print("  Pitch="); Serial.print(pitch, 2);
+    Serial.print("  Yaw=");   Serial.print(yaw,   2);
+    Serial.println(" deg");
 
     // --- Temps tâche RPi ---
     float duree_us = (float)(micros() - t_debut);
