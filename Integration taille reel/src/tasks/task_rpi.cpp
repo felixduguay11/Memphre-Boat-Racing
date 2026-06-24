@@ -52,12 +52,12 @@ void Task_RPi(void *ptr)
       output_arriere_gauche = H_outputs[1];
       output_arriere_droit  = H_outputs[2];
 
-      cmd_avant             = H_cmd_servos[0];
-      cmd_arriere_gauche    = H_cmd_servos[1];
-      cmd_arriere_droit     = H_cmd_servos[2];
+      cmd_avant             = HPR_cmd_servos[0];
+      cmd_arriere_gauche    = HPR_cmd_servos[1];
+      cmd_arriere_droit     = HPR_cmd_servos[2];
 
       temps_tache_sonar     = Sonar_temps_us;
-      temps_tache_H_ctrl    = H_control_time_us;
+      temps_tache_H_ctrl    = HPR_control_time_us;
 
       roll                  = Xsens_data.roll;
       pitch                 = Xsens_data.pitch;

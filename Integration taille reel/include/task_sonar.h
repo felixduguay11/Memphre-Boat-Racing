@@ -5,12 +5,12 @@
 #include "config.h"
 
 // Variables sonars
-float distance_filt[NB_CANAUX] = {SONAR_DISTANCE_REF_AVANT, SONAR_DISTANCE_REF_ARRIERE_GAUCHE, SONAR_DISTANCE_REF_ARRIERE_DROIT};
-int PINS_SONARS[NB_CANAUX] = {Analog_Sonar_Avant, Analog_Sonar_Arriere_Gauche, Analog_Sonar_Arriere_Droit};
+extern float distance_filt[NB_CANAUX];
+extern int PINS_SONARS[NB_CANAUX];
 
 // Variables partagées
-extern float Sonar_distance[NB_CANAUX] = {SONAR_INIT_DISTANCE, SONAR_INIT_DISTANCE, SONAR_INIT_DISTANCE};
-extern float Sonar_temps_us            =  SONAR_INIT_TIME;
+extern float Sonar_distance[NB_CANAUX];
+extern float Sonar_temps_us;
 
 // Fonction
 float lire_sonar(int pin, float &filt);

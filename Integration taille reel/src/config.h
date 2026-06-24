@@ -75,46 +75,71 @@
 
 #define H_DEADBAND_ERR          1.0f
 #define H_DEADBAND_DERIV        0.3f
-#define H_ALPHA_DERIV           0.15f
 #define H_INTEGRAL_MAX          20.0f
 #define H_INTEGRAL_MIN          -20.0f
 
 // Grande Erreur
+#define H_GRANDE_ERREUR         10.0f
 #define H_KP_HAUT               1.6f
 #define H_KI_HAUT               0.0f
 #define H_KD_HAUT               1.9f
+
 // Moyenne Erreur
+#define H_MOYENNE_ERREUR        5.0f
 #define H_KP_MID                0.6f
 #define H_KI_MID                0.05f
 #define H_KD_MID                0.4f
+
 // Petite Erreur
 #define H_KP_BAS                0.4f
 #define H_KI_BAS                0.1f
 #define H_KD_BAS                0.2f
-
-#define H_INIT_INTEGRAL         0.0f
-#define H_INIT_DERIVE           0.0f
-#define H_INIT_OUTPUTS          0.0f
-#define H_INIT_CMD              0.0f
-#define H_INIT_TIME             0.0f
 //------------------------------------//
 
+//----------- PITCH CONTROLE -------//
+#define P_REF_DEG             0.0f
+#define P_DEADBAND_ERR        2.0f   
+#define P_DEADBAND_DERIV      0.3f    
+#define P_INTEGRAL_MIN       -20.0f
+#define P_INTEGRAL_MAX        20.0f
+ 
+// Grande erreur (>30°)
+#define P_GRANDE_ERREUR       30.0f
+#define P_KP_HAUT             2.0f
+#define P_KI_HAUT             0.0f
+#define P_KD_HAUT             1.0f
 
-//---------- ROULIS CONTROLE ---------//
-#define R_DISTANCE_REF        70.0f
+// Moyenne erreur (>20°)
+#define P_MOYENNE_ERREUR      20.0f
+#define P_KP_MID              1.0f
+#define P_KI_MID              0.05f
+#define P_KD_MID              0.5f
+
+// Petite erreur (<20°)
+#define P_KP_BAS              0.5f
+#define P_KI_BAS              0.1f
+#define P_KD_BAS              0.2f
+//------------------------------------//
+
+//---------- ROLL CONTROLE ---------//
+#define R_REF_DEG             0.0f    // A changer par la consigne du volant !!!
 #define R_DEADBAND_ERR        1.0f
 #define R_DEADBAND_DERIV      0.3f
-#define R_ALPHA_DERIV         0.15f
 #define R_INTEGRAL_MAX        20.0f
 #define R_INTEGRAL_MIN       -20.0f
+
 // Grande Erreur
+#define R_GRANDE_ERREUR       20.0f
 #define R_KP_HAUT             1.6f
 #define R_KI_HAUT             0.0f
 #define R_KD_HAUT             1.9f
+
 // Moyenne Erreur
+#define R_MOYENNE_ERREUR      10.0f
 #define R_KP_MID              0.6f
 #define R_KI_MID              0.05f
-#define R_PID_KD_MID          0.4f
+#define R_KD_MID              0.4f
+
 // Petite Erreur
 #define R_KP_BAS              0.4f
 #define R_KI_BAS              0.1f
@@ -166,6 +191,51 @@
 #define I_F_R                       40
 //#define PIN_41                      41
 //------------------------------------//
+
+/*
+//------------- MINIATURE : RC + ESC + DIRECTION -------------//
+#define PERIODE_SM_MS        20      // 50 Hz
+
+// Récepteur FlySky (PWM, 5 canaux)
+#define PIN_RC_CH1   20   // Direction      ⚠ = Serial5 (Xsens) sur le vrai bateau
+#define PIN_RC_CH3   22   // Throttle
+#define PIN_RC_CH5   24   // Switch A (armement RUN)
+#define PIN_RC_CH6   25   // Knob VrA (consigne hauteur, futur)
+#define PIN_RC_CH7   26   // Switch C (marche arrière)
+#define RC_PULSE_MIN_US   1000
+#define RC_PULSE_MAX_US   2000
+#define RC_PULSE_MID_US   1500
+#define RC_DEADBAND_US    30
+#define RC_TIMEOUT_MS     500
+
+// ESC (2 moteurs)
+#define PIN_ESC_LEFT          2
+#define PIN_ESC_RIGHT         3
+#define ESC_PWM_FREQ_HZ       50
+#define ESC_PULSE_MIN_US      1000
+#define ESC_PULSE_NEUTRAL_US  1500
+#define ESC_PULSE_MAX_US      2000
+#define ESC_ARM_PULSE_US      ESC_PULSE_MIN_US
+#define ESC_ARM_DELAY_MS      2000
+
+// Servo direction (rudder)
+#define PIN_SERVO_RUDDER    4
+#define RUDDER_PULSE_MIN_US 1000
+#define RUDDER_PULSE_MAX_US 2000
+#define RUDDER_CENTER_US    1500
+
+// Seuils machine d'état (fraction du throttle max)
+#define SM_SPEED_THRESHOLD_HIGH  0.10f   // AVANCE → CONTROLE
+#define SM_SPEED_THRESHOLD_LOW   0.085f  // CONTROLE → AVANCE
+
+// Sécurité foils : 0 = neutre (test moteurs) ; 1 = PID actif en CONTROLE
+#define MINIATURE_FOILS_ENABLED  0
+
+// --- Servos: hydrofoils ---
+#define PIN_FOIL_FRONT      5 // fil vert
+#define PIN_FOIL_REAR_LEFT  6 // fil rouge
+#define PIN_FOIL_REAR_RIGHT 7 // fil jaune
+*/
 
 #endif /* CONFIG_H */
 

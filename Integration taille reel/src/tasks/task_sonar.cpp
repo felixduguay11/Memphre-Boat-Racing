@@ -1,5 +1,12 @@
 #include "task_sonar.h"
 
+// Définitions des variables
+float distance_filt[NB_CANAUX] = {SONAR_DISTANCE_REF_AVANT, SONAR_DISTANCE_REF_ARRIERE_GAUCHE, SONAR_DISTANCE_REF_ARRIERE_DROIT};
+int   PINS_SONARS[NB_CANAUX]   = {Analog_Sonar_Avant, Analog_Sonar_Arriere_Gauche, Analog_Sonar_Arriere_Droit};
+
+float Sonar_distance[NB_CANAUX] = {SONAR_INIT_DISTANCE, SONAR_INIT_DISTANCE, SONAR_INIT_DISTANCE};
+float Sonar_temps_us            = SONAR_INIT_TIME;
+
 // Mutex
 extern SemaphoreHandle_t dataMutex;
 
