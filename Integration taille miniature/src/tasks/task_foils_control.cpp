@@ -166,7 +166,8 @@ void Task_foils_Control(void *ptr)
         }
 
         servo_raw[0] = (float)SERVO_NEUTRAL[0] + hauteur_out[0] + pitch_out;              // avant
-        servo_raw[1] = (float)SERVO_NEUTRAL[1] + hauteur_out[1] - pitch_out - roll_out;   // arr. gauche
+        //servo_raw[1] = (float)SERVO_NEUTRAL[1] + hauteur_out[1] - pitch_out - roll_out;   // arr. gauche
+        servo_raw[1] = (float)SERVO_NEUTRAL[1] - pitch_out - roll_out;
         servo_raw[2] = (float)SERVO_NEUTRAL[2] + hauteur_out[2] - pitch_out + roll_out;   // arr. droit
         
         for (int i = 0; i < NB_CANAUX; i++) {
