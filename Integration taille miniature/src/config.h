@@ -9,6 +9,32 @@
 #define BAUD_RPI        115200   
 //------------------------------------//
 
+//======= SELECTION TEST UNITAIRE =======//
+// Décommenter UNE seule ligne pour isoler une tâche.
+// Tout commenté = mode normal (toutes les tâches).
+//#define TEST_XSENS
+//#define TEST_SONAR
+//#define TEST_FOILS
+ 
+#if   defined(TEST_XSENS)
+  #define RUN_XSENS 1
+  #define RUN_SONAR 0
+  #define RUN_FOILS 0
+#elif defined(TEST_SONAR)
+  #define RUN_XSENS 0
+  #define RUN_SONAR 1
+  #define RUN_FOILS 0
+#elif defined(TEST_FOILS)
+  #define RUN_XSENS 0
+  #define RUN_SONAR 1   // les foils ont besoin des sonars
+  #define RUN_FOILS 1
+#else  // mode normal
+  #define RUN_XSENS 1
+  #define RUN_SONAR 1
+  #define RUN_FOILS 1
+#endif
+//========================================//
+
 
 //-------- PERIODE DES TACHES --------//
 #define PERIODE_Xsens_MS            10   // 100Hz
