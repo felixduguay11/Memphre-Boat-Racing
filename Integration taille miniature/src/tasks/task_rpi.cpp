@@ -1,17 +1,36 @@
 #include "task_rpi.h"
+#include "task_propulsion.h"      // MODIF : snapshot manette (Prop_*)
+#include "task_state_machine.h"   // MODIF : état machine (SM_*) + enums
 
 // Mutex défini dans main.cpp
 extern SemaphoreHandle_t dataMutex;
+
+// MODIF : helpers d'affichage des états de la machine d'état
+static const char* topStateStr(TopState s)
+{
+    switch (s) {
+        case TopState::IDLE: return "IDLE";
+        case TopState::RUN:  return "RUN";
+        case TopState::STOP: return "STOP";
+    }
+    return "?";
+}
+
+static const char* runStateStr(RunState s)
+{
+    switch (s) {
+        case RunState::NEUTRE:   return "NEUTRE";
+        case RunState::AVANCE:   return "AVANCE";
+        case RunState::RECULE:   return "RECULE";
+        case RunState::CONTROLE: return "CONTROLE";
+    }
+    return "?";
+}
 
 // =====================================================
 // Task_RPi — priorité 1 (basse), période 500ms
 //
 // PHASE ACTUELLE : affichage Serial uniquement
-//
-// Les blocs d'affichage sont conditionnés par les flags
-// RUN_SONAR / RUN_FOILS / RUN_XSENS (voir config.h) afin
-// de n'afficher que les tâches réellement actives pendant
-// les tests unitaires.
 //
 // PHASE FUTURE : remplacer les Serial.print() par
 //   Serial2.print() pour envoyer au Raspberry Pi
@@ -47,20 +66,24 @@ void Task_RPi(void *ptr)
     float    pitch                = 0.0f;
     float    yaw                  = 0.0f;
 
-    // --- Champs Xsens supplémentaires (test unitaire) ---
-    bool     att_valid            = false;
-    bool     pos_valid            = false;
-    bool     vel_valid            = false;
-    double   lat                  = 0.0;
-    double   lon                  = 0.0;
-    float    speed                = 0.0f;
-    float    xsens_us             = 0.0f;
+    // MODIF : télémétrie machine d'état + propulsion
+    TopState sm_top               = TopState::IDLE;
+    RunState sm_run               = RunState::NEUTRE;
+    bool     sm_foils             = false;
+    float    temps_tache_sm       = 0.0f;
+
+    float    rc_throttle          = 0.0f;
+    float    rc_rudder            = 0.0f;
+    bool     rc_switchA           = false;
+    bool     rc_switchC           = false;
+    bool     rc_valid             = false;
+    float    temps_tache_prop     = 0.0f;
 
     if (xSemaphoreTake(dataMutex, portMAX_DELAY))
     {
       dist_avant            = Sonar_distance[0];
       dist_arriere_gauche   = Sonar_distance[1];
-      dist_arriere_droit    = Sonar_distance[2];
+      //dist_arriere_droit    = Sonar_distance[2];
 
       output_avant          = H_outputs[0];
       output_arriere_gauche = H_outputs[1];
@@ -77,13 +100,19 @@ void Task_RPi(void *ptr)
       pitch                 = Xsens_data.pitch;
       yaw                   = Xsens_data.yaw;
 
-      att_valid             = Xsens_data.att_valid;
-      pos_valid             = Xsens_data.pos_valid;
-      vel_valid             = Xsens_data.vel_valid;
-      lat                   = Xsens_data.lat;
-      lon                   = Xsens_data.lon;
-      speed                 = Xsens_data.speed;
-      xsens_us              = Xsens_data.temps_us;
+      // MODIF : machine d'état
+      sm_top                = SM_top_state;
+      sm_run                = SM_run_state;
+      sm_foils              = SM_foil_control_active;
+      temps_tache_sm        = SM_control_time_us;
+
+      // MODIF : propulsion / manette
+      rc_throttle           = Prop_rc_throttle;
+      rc_rudder             = Prop_rc_rudder;
+      rc_switchA            = Prop_rc_switchA;
+      rc_switchC            = Prop_rc_switchC;
+      rc_valid              = Prop_rc_valid;
+      temps_tache_prop      = Prop_control_time_us;
 
       xSemaphoreGive(dataMutex);
     }
@@ -92,42 +121,53 @@ void Task_RPi(void *ptr)
     // AFFICHAGE SERIAL
     // =====================================================
 
-#if RUN_SONAR
     // --- Sonar ---
     Serial.print("[Sonar]    ");
     Serial.print(temps_tache_sonar, 1);
     Serial.print(" us  |  Dist=");
     Serial.print(dist_avant, 1);
     Serial.println(" cm");
-#endif
 
-#if RUN_FOILS
     // --- Controle foils ---
     Serial.print("[Foils]    ");
     Serial.print(temps_tache_H_ctrl, 1);
     Serial.print(" us  |  Erreur=");
     Serial.print(H_DISTANCE_REF_AVANT - dist_avant, 2);
     Serial.print("  Output=");
-    Serial.print(output_arriere_gauche, 2);
+    Serial.print(output_avant, 2);
     Serial.print("  Cmd=");
-    Serial.println(cmd_arriere_gauche, 1);
-#endif
+    Serial.println(cmd_avant, 1);
 
-#if RUN_XSENS
     // --- IMU attitude ---
-    Serial.print("[Xsens] valid A/P/V=");
-    Serial.print(att_valid); Serial.print("/");
-    Serial.print(pos_valid); Serial.print("/");
-    Serial.print(vel_valid);
-    Serial.print("  Roll=");   Serial.print(roll,  1);
-    Serial.print(" Pitch=");   Serial.print(pitch, 2);
-    Serial.print(" Yaw=");     Serial.print(yaw,   2);
-    Serial.print(" deg | Speed="); Serial.print(speed, 2);
-    Serial.print(" m/s | t=");     Serial.print(xsens_us, 1);
-    Serial.println(" us");
-    Serial.print("        Lat="); Serial.print(lat, 6);
-    Serial.print(" Lon=");        Serial.println(lon, 6);
-#endif
+    Serial.print("[Xsens]      ");
+    Serial.print("Roll=");    Serial.print(roll,  1);
+    Serial.print("  Pitch="); Serial.print(pitch, 2);
+    Serial.print("  Yaw=");   Serial.print(yaw,   2);
+    Serial.println(" deg");
+
+    // --- MODIF : Machine d'état ---
+    Serial.print("[SM]       ");
+    Serial.print(temps_tache_sm, 1);
+    Serial.print(" us  |  Top=");
+    Serial.print(topStateStr(sm_top));
+    Serial.print("  Run=");
+    Serial.print(runStateStr(sm_run));
+    Serial.print("  Foils=");
+    Serial.println(sm_foils ? "ON" : "OFF");
+
+    // --- MODIF : Propulsion / manette ---
+    Serial.print("[Prop]     ");
+    Serial.print(temps_tache_prop, 1);
+    Serial.print(" us  |  RC=");
+    Serial.print(rc_valid ? "OK " : "LOST");
+    Serial.print("  Thr=");
+    Serial.print(rc_throttle, 2);
+    Serial.print("  Rud=");
+    Serial.print(rc_rudder, 2);
+    Serial.print("  A=");
+    Serial.print(rc_switchA ? 1 : 0);
+    Serial.print("  C=");
+    Serial.println(rc_switchC ? 1 : 0);
 
     // --- Temps tâche RPi ---
     float duree_us = (float)(micros() - t_debut);
