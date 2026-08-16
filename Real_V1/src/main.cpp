@@ -8,6 +8,7 @@ VescCANBus vesc(adapterCan1);
 
 #define BAUD_RATE   250000   // VESC utilise 250 kbps par défaut
 #define COMM_RATE   50      // Intervalle d'envoi de commandes (ms)
+#define PRINT_MS    1000     // Intervalle d'affichage Serial (ms)  <-- AJOUT
 #define VESC_ID_A   10       // ID du premier ESC  (régler dans VESC Tool)
 #define VESC_ID_B   11       // ID du deuxième ESC (si présent)
 #define PIN_LEVIER_VITESSE 27
@@ -33,15 +34,17 @@ int target = 0;
 float rampedTarget = 0;   // valeur réellement envoyée, lissée vers "target"
 unsigned long lastSendA = 0;
 unsigned long lastSendB = 0;
-void StateMachine(int target);
+uint32_t lastPrintMs = 0;                 // <-- AJOUT : cadence l'affichage Serial
+int StateMachine(int target);
 int CreateTargetForward();
 int CreateTargetReverse();
+void printVescValuesSerial(int id, float rampedTarget, RunMode currentRunMode);       // <-- AJOUT
 
 
 void setup() {
   Serial.begin(9600);       // debug USB
-  pinMode(PIN_SWITCH_IN, INPUT_PULLUP);
-  pinMode(PIN_SWITCH_F_R, INPUT_PULLUP);
+  pinMode(PIN_SWITCH_IN, INPUT_PULLDOWN);
+  pinMode(PIN_SWITCH_F_R, INPUT_PULLDOWN);
 
   while (!Serial && millis() < 3000);
 
@@ -75,10 +78,17 @@ void loop() {
   }
 
   StateMachine(target);
+
+  // ── 3. Affichage périodique des valeurs moteur sur le Serial ──  <-- AJOUT
+  if (millis() - lastPrintMs >= PRINT_MS) {
+    lastPrintMs = millis();
+    printVescValuesSerial(VESC_ID_A, rampedTarget, currentRunMode);
+    printVescValuesSerial(VESC_ID_B, rampedTarget, currentRunMode);
+  }
 }
 
 
-void StateMachine(int target) {
+int StateMachine(int target) {
   if (millis() - lastSendRef > 20) {
 
     if (rampedTarget < target) {
@@ -91,32 +101,33 @@ void StateMachine(int target) {
       case IDLE:
         vesc.setERPM(VESC_ID_A, rampedTarget);
         vesc.setERPM(VESC_ID_B, rampedTarget);
-        Serial.print("IDLE    ");
-        Serial.println(rampedTarget);
+        //Serial.print("IDLE    ");
+        //Serial.println(rampedTarget);
         break;
       case RUN:
         switch(currentRunMode){
           case NEUTRAL:
             vesc.setERPM(VESC_ID_A, rampedTarget);
             vesc.setERPM(VESC_ID_B, rampedTarget);
-            Serial.print("NEUTRAL");
+            // Serial.print("NEUTRAL");
             break;
           case FORWARD:
             vesc.setERPM(VESC_ID_A, rampedTarget);
             vesc.setERPM(VESC_ID_B, rampedTarget);
-            Serial.print("FORWARD    ");
-            Serial.println(rampedTarget);
+            //Serial.print("FORWARD    ");
+            //Serial.println(rampedTarget);
             break;
           case REVERSE:
             vesc.setERPM(VESC_ID_A, rampedTarget);
             vesc.setERPM(VESC_ID_B, rampedTarget);
-            Serial.print("REVERSE    ");
-            Serial.println(rampedTarget);
+            //Serial.print("REVERSE    ");
+            //Serial.println(rampedTarget);
             break;
         }
     }
     lastSendRef = millis();
   }
+  return rampedTarget;
 }
 
 int CreateTargetForward(){
@@ -131,4 +142,73 @@ int CreateTargetReverse(){
   //raw = constrain(raw, 100, 1023);   // évite l'extrapolation de map() hors plage
   int desired_speed = map(raw, 0, 1023, 0, -3000);
   return desired_speed;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Print dans le serial les valeurs des ESCs
+//  (repris de vesc_can_reader_v4)
+// ─────────────────────────────────────────────────────────────
+void printVescValuesSerial(int id, float rampedTarget, RunMode currentRunMode) {
+  if (!vesc.isUpdated(id)) {                                    // <-- AJOUT
+    Serial.printf("[ESC %u] Aucune donnée reçue.\n", id);       // <-- AJOUT
+    return;                                                     // <-- AJOUT
+  }
+  Serial.print("\n==================================================================================================================================\n");
+  Serial.printf("[ESC %u] eRPM=%-8ld  I=%.2f A  Duty=%.1f%%  "
+    "Vin=%.1f V  FET=%.1f°C  Mot=%.1f°C\n", id,
+    vesc.getERPM(id),
+    vesc.getMotorCurrent(id),
+    vesc.getDutyCycle(id) * 100.0f,
+    vesc.getVoltageIn(id),
+    vesc.getTempFET(id),
+    vesc.getTempMotor(id)
+  );
+
+// ── Calculs ────────────────────────────────────────────
+  float inpVoltage    = vesc.getVoltageIn(id);
+  float inpCurrent    = vesc.getCurrentIn(id);
+  float outCurrent    = vesc.getMotorCurrent(id);
+  float duty          = vesc.getDutyCycle(id);
+  float rpm           = vesc.getRPM(id, 6);
+  float erpm          = vesc.getERPM(id);
+  float tachometerAbs = vesc.getTachometer(id);
+  float tempMotor     = vesc.getTempMotor(id);
+  float tempMosfet    = vesc.getTempFET(id);
+  float inpampHours   = vesc.getAmpHours(id);
+  float outampHours   = vesc.getAmpHoursChg(id);
+  float inpwattHours  = vesc.getWattHours(id);
+  float outwattHours  = vesc.getWattHoursChg(id); 
+
+    // Tension moteur estimée (Vbatt × duty)
+  float outVoltage  = inpVoltage * duty;
+
+  // Puissances
+  float inpPower    = inpVoltage * inpCurrent;
+  float outPower    = outVoltage * outCurrent;
+
+  // Efficacité (évite division par zéro)
+  float efficiency_wh  = 0;
+  float efficiency =0;
+  if (inpampHours > 0.2) {
+    efficiency_wh = (outwattHours / inpwattHours) * 100.0;
+    efficiency_wh = constrain(efficiency_wh, 0, 100);
+    efficiency = (outPower / inpPower) * 100.0;
+  }
+
+
+  Serial.print(__TIME__);
+  Serial.print("\n");
+  Serial.printf(">RPM:%.2f\t\t>ERPM:%.2f\t\t>DutyCycle:%.2f\t\t>TachometerAbs:%.2f\t\t>TempMotor:%.2f\t\t>TempMosfet:%.2f\n", 
+    rpm, erpm, duty, tachometerAbs, tempMotor, tempMosfet);
+  
+  Serial.printf(">InpVoltage:%.2f\t\t>InpCurrent:%.2f\t\t>InpPower:%.2f\t\t>InpAmpHours:%.3f\t\t>InpWattHours:%.3f\n", 
+    inpVoltage, inpCurrent, inpPower, inpampHours, inpwattHours);
+
+  Serial.printf(">OutVoltage:%.2f\t\t>OutCurrent:%.2f\t\t>OutPower:%.2f\t\t>OutAmpHours:%.3f\t\t>OutWattHours:%.3f\n", 
+    outVoltage, outCurrent, outPower, outampHours, outwattHours);
+
+  Serial.printf(">Efficiency(Wh):%.2f\t\t>Efficiency(W):%.2f\n", efficiency_wh*100, efficiency*100);
+  const char* runModeStr[] = { "FORWARD", "REVERSE", "NEUTRAL" };
+  Serial.printf(">rampedTarget(ERPM):%.2f\n", rampedTarget);
+  Serial.printf("Mode actuel: %s\n", runModeStr[currentRunMode]);
 }
