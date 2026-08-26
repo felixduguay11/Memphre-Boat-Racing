@@ -1,25 +1,27 @@
 #pragma once
 
 // ============================================================
-//  StateMachine.h  –  Top-level & Run sub-state machine
-//  RC Hydrofoil – Teensy 4.1
+//  StateMachine.h  –  Machine d'état haut-niveau + sous-états RUN
+//  Memphre Boat Racing – Teensy 4.1
 //
-//  Top-level states:
+//  Porté depuis Miniature/include/StateMachine.h.
+//  Modif vs original : include "config.h" (minuscule, guillemets).
+//
+//  États haut-niveau :
 //    IDLE  → attente, moteurs arrêtés, foils neutres
 //    RUN   → actif, entre dans les sous-états
-//    STOP  → arrêt d'urgence (perte RC ou erreur)
+//    STOP  → arrêt d'urgence (perte RC ou SwA OFF)
 //
-//  Run sub-states:
-//    NEUTRE   → throttle = 0, foils fixes
-//    AVANCE   → throttle > 0, foils fixes
-//    RECULE   → SwC ON, foils fixes
-//    CONTROLE → throttle >= SM_SPEED_THRESHOLD_HIGH, PID actif
+//  Sous-états RUN :
+//    NEUTRE   → throttle = 0
+//    AVANCE   → throttle > 0
+//    RECULE   → SwC ON
+//    CONTROLE → throttle >= SM_SPEED_THRESHOLD_HIGH (PID foils actif)
 //
-//  Transitions:
+//  Transitions :
 //    IDLE  → RUN    : SwA ON
-//    RUN   → STOP   : SwA OFF ou RC timeout
-//    STOP  → IDLE   : automatique après arrêt complet
-//
+//    RUN   → STOP   : SwA OFF ou timeout RC
+//    STOP  → IDLE   : automatique après arrêt
 //    NEUTRE  → AVANCE   : throttle > 0
 //    NEUTRE  → RECULE   : SwC ON
 //    AVANCE  → NEUTRE   : throttle == 0
@@ -29,10 +31,10 @@
 // ============================================================
 
 #include <Arduino.h>
-#include <Config.h>
+#include "config.h"
 
 // ----------------------------------------------------------------
-// State enums
+// Enums d'état
 // ----------------------------------------------------------------
 enum class TopState : uint8_t {
     IDLE  = 0,
@@ -48,19 +50,19 @@ enum class RunState : uint8_t {
 };
 
 // ----------------------------------------------------------------
-// Input snapshot — filled by main.cpp before calling update()
+// Snapshot d'entrée — rempli avant l'appel à update()
 // ----------------------------------------------------------------
 struct SMInputs {
     float throttle;   // [0.0, +1.0]
     float rudder;     // [-1.0, +1.0]
-    bool  switchA;    // ON/OFF
-    bool  switchB;    // unused
-    bool  switchC;    // reverse
-    bool  rcValid;    // false = signal lost → STOP
+    bool  switchA;    // ON/OFF (armement)
+    bool  switchB;    // inutilisé
+    bool  switchC;    // marche arrière
+    bool  rcValid;    // false = signal perdu → STOP
 };
 
 // ================================================================
-//  StateMachine class
+//  Classe StateMachine
 // ================================================================
 class StateMachine {
 public:
@@ -69,7 +71,6 @@ public:
     void begin();
     void update(const SMInputs& in);
 
-    // Accessors
     TopState getTopState() const { return _top; }
     RunState getRunState() const { return _run; }
     bool     isRunning()   const { return _top == TopState::RUN;  }
