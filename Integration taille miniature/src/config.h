@@ -76,9 +76,9 @@
 #define SONAR_DIST_MIN_CM   20.0f
 #define SONAR_DIST_MAX_CM   200.0f
 #define SONAR_ALPHA         0.2f
-#define SONAR_DISTANCE_REF_AVANT            70.0f
-#define SONAR_DISTANCE_REF_ARRIERE_GAUCHE   70.0f
-#define SONAR_DISTANCE_REF_ARRIERE_DROIT    70.0f
+#define SONAR_DISTANCE_REF_AVANT            32.5f
+#define SONAR_DISTANCE_REF_ARRIERE_GAUCHE   32.5f
+#define SONAR_DISTANCE_REF_ARRIERE_DROIT    32.5f
 #define SONAR_INIT_DISTANCE 0.0f
 #define SONAR_INIT_TIME     0.0f
 //------------------------------------//
@@ -122,13 +122,13 @@
 #define H_INTEGRAL_MAX          20.0f
 #define H_INTEGRAL_MIN          -20.0f
 
-// Grande Erreur
+// Grande Erreur (>10cm)
 #define H_GRANDE_ERREUR         10.0f
 #define H_KP_HAUT               1.6f
 #define H_KI_HAUT               0.0f
 #define H_KD_HAUT               1.9f
 
-// Moyenne Erreur
+// Moyenne Erreur (>5cm)
 #define H_MOYENNE_ERREUR        5.0f
 #define H_KP_MID                0.6f
 #define H_KI_MID                0.05f
@@ -246,7 +246,7 @@
 #define PWM_Servo_Arriere_Droit     7
 //#define PIN_5                       5
 //#define PIN_6                       6
-#define RX2                         7
+//#define RX2                         7
 #define TX2                         8
 //#define PIN_9                       9
 //#define PIN_10                      10
@@ -261,12 +261,12 @@
 #define Relay_Control               19
 #define TX_Xsens                    17
 #define RX_Xsens                    16
-#define TX_Batt_72V                 22
-#define RX_Batt_72V                 23
+//#define TX_Batt_72V                 22
+//#define RX_Batt_72V                 23
 //#define PIN_24                      24
-#define POT_Mats_Arriere            25
-#define POT_Volant                  26
-#define POT_Levier                  27
+//#define POT_Mats_Arriere            25
+//#define POT_Volant                  26
+//#define POT_Levier                  27
 //#define PIN_28                      28
 //#define PIN_29                      29
 #define RX_Moteur                   30
