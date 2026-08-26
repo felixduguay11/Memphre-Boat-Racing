@@ -1,7 +1,7 @@
 #include "task_xsens.h"
 
 extern SemaphoreHandle_t dataMutex;
-static MTi670 s_mti(Serial5, BAUD_Xsens);
+static MTi670 s_mti(Serial4, BAUD_Xsens);
 
 XsensData Xsens_data = {
     .roll = 0.0f, .pitch = 0.0f, .yaw = 0.0f, .att_valid = false,
