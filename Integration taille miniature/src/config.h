@@ -36,6 +36,12 @@
 #endif
 //========================================//
 
+//------- FLAGS DE TEST DES FOILS ----------//
+// 1 = terme actif, 0 = terme force a zero
+#define FOIL_HAUTEUR_ACTIVE   1
+#define FOIL_PITCH_ACTIVE     1
+#define FOIL_ROLL_ACTIVE      1
+//------------------------------------//
 
 //-------- PERIODE DES TACHES --------//
 #define PERIODE_Xsens_MS            10   // 100 Hz
@@ -88,16 +94,21 @@
 #define SERVO_ALPHA                    0.2f
 // SERVO AVANT
 #define SERVO_AVANT_NEUTRAL            90
-#define SERVO_AVANT_MIN                80
-#define SERVO_AVANT_MAX                100
+#define SERVO_AVANT_MIN                70
+#define SERVO_AVANT_MAX                125
 // SERVO ARRIERE GAUCHE
 #define SERVO_ARRIERE_GAUCHE_NEUTRAL   90
-#define SERVO_ARRIERE_GAUCHE_MIN       80
-#define SERVO_ARRIERE_GAUCHE_MAX       100
+#define SERVO_ARRIERE_GAUCHE_MIN       70
+#define SERVO_ARRIERE_GAUCHE_MAX       120
 // SERVO ARRIERE DROIT
 #define SERVO_ARRIERE_DROIT_NEUTRAL    90
-#define SERVO_ARRIERE_DROIT_MIN        80
-#define SERVO_ARRIERE_DROIT_MAX        100
+#define SERVO_ARRIERE_DROIT_MIN        60
+#define SERVO_ARRIERE_DROIT_MAX        110
+
+// Sens de commande par foil : +1 normal, -1 inverse
+#define SERVO_AVANT_SENS            -1.0f
+#define SERVO_ARRIERE_GAUCHE_SENS    1.0f
+#define SERVO_ARRIERE_DROIT_SENS    -1.0f
 
 // Physical travel limits (tune after installation)
 #define FOIL_ANGLE_MIN_DEG   25.0f       // Full dive
@@ -113,7 +124,7 @@
 
 
 //--------- HAUTEUR CONTROLE ---------//
-#define H_DISTANCE_REF_AVANT            32.5f
+#define H_DISTANCE_REF_AVANT            33.5f
 #define H_DISTANCE_REF_ARRIERE_GAUCHE   32.5f
 #define H_DISTANCE_REF_ARRIERE_DROIT    32.5f
 
@@ -123,13 +134,13 @@
 #define H_INTEGRAL_MIN          -20.0f
 
 // Grande Erreur (>10cm)
-#define H_GRANDE_ERREUR         10.0f
-#define H_KP_HAUT               1.6f
+#define H_GRANDE_ERREUR         8.0f
+#define H_KP_HAUT               1.9f
 #define H_KI_HAUT               0.0f
 #define H_KD_HAUT               1.9f
 
 // Moyenne Erreur (>5cm)
-#define H_MOYENNE_ERREUR        5.0f
+#define H_MOYENNE_ERREUR        4.0f
 #define H_KP_MID                0.6f
 #define H_KI_MID                0.05f
 #define H_KD_MID                0.4f
@@ -143,22 +154,22 @@
 
 //----------- PITCH CONTROLE -------//
 #define P_REF_DEG             0.0f
-#define P_DEADBAND_ERR        2.0f   
+#define P_DEADBAND_ERR        3.0f   
 #define P_DEADBAND_DERIV      0.3f    
 #define P_INTEGRAL_MIN       -20.0f
 #define P_INTEGRAL_MAX        20.0f
  
 // Grande erreur (>30°)
-#define P_GRANDE_ERREUR       30.0f
+#define P_GRANDE_ERREUR       15.0f
 #define P_KP_HAUT             2.0f
 #define P_KI_HAUT             0.0f
-#define P_KD_HAUT             1.0f
+#define P_KD_HAUT             1.8f
 
 // Moyenne erreur (>20°)
-#define P_MOYENNE_ERREUR      20.0f
-#define P_KP_MID              1.0f
+#define P_MOYENNE_ERREUR      10.0f
+#define P_KP_MID              1.2f
 #define P_KI_MID              0.05f
-#define P_KD_MID              0.5f
+#define P_KD_MID              0.9f
 
 // Petite erreur (<20°)
 #define P_KP_BAS              0.5f
@@ -175,13 +186,13 @@
 #define R_INTEGRAL_MIN       -20.0f
 
 // Grande Erreur
-#define R_GRANDE_ERREUR       20.0f
+#define R_GRANDE_ERREUR       10.0f
 #define R_KP_HAUT             1.6f
 #define R_KI_HAUT             0.0f
 #define R_KD_HAUT             1.9f
 
 // Moyenne Erreur
-#define R_MOYENNE_ERREUR      10.0f
+#define R_MOYENNE_ERREUR      5.0f
 #define R_KP_MID              0.6f
 #define R_KI_MID              0.05f
 #define R_KD_MID              0.4f

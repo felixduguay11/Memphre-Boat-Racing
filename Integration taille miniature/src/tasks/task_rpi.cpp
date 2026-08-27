@@ -120,31 +120,31 @@ void Task_RPi(void *ptr)
     // =====================================================
     // AFFICHAGE SERIAL
     // =====================================================
-
+    /*
     // --- Sonar ---
     Serial.print("[Sonar]    ");
     Serial.print(temps_tache_sonar, 1);
     Serial.print(" us  |  Dist=");
     Serial.print(dist_avant, 1);
     Serial.println(" cm");
-
+    */
     // --- Controle foils ---
     Serial.print("[Foils]    ");
     Serial.print(temps_tache_H_ctrl, 1);
     Serial.print(" us  |  Erreur=");
-    Serial.print(H_DISTANCE_REF_AVANT - dist_avant, 2);
-    Serial.print("  Output=");
-    Serial.print(output_avant, 2);
-    Serial.print("  Cmd=");
-    Serial.println(cmd_avant, 1);
-
+    Serial.print(P_REF_DEG - pitch, 2);
+    Serial.print("  Cmd_avant=");
+    Serial.print(cmd_avant, 1);
+    Serial.print("  Cmd_droit=");
+    Serial.println(cmd_arriere_droit, 1);
+    
     // --- IMU attitude ---
     Serial.print("[Xsens]      ");
     Serial.print("Roll=");    Serial.print(roll,  1);
     Serial.print("  Pitch="); Serial.print(pitch, 2);
     Serial.print("  Yaw=");   Serial.print(yaw,   2);
     Serial.println(" deg");
-
+    /*
     // --- MODIF : Machine d'état ---
     Serial.print("[SM]       ");
     Serial.print(temps_tache_sm, 1);
@@ -175,7 +175,7 @@ void Task_RPi(void *ptr)
     Serial.print(duree_us, 1);
     Serial.println(" us");
     Serial.println("------------------------------------------");
-
+    */
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(PERIODE_RPI_MS));
   }
 }

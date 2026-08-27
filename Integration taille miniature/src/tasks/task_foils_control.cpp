@@ -10,6 +10,7 @@ static PWMServo servo_arriere_gauche;
 static PWMServo servo_arriere_droit;
 
 // ─── Variables d'état PID (privées à cette tâche, static) ───────────────────
+const float SERVO_SENS[NB_CANAUX] = {SERVO_AVANT_SENS, SERVO_ARRIERE_GAUCHE_SENS, SERVO_ARRIERE_DROIT_SENS};
 static float cmd_filt[NB_CANAUX]    = {SERVO_AVANT_NEUTRAL, SERVO_ARRIERE_GAUCHE_NEUTRAL, SERVO_ARRIERE_DROIT_NEUTRAL};
 static float H_prev_dist[NB_CANAUX] = {0.0f, 0.0f, 0.0f};
 static float H_integral[NB_CANAUX]  = {0.0f, 0.0f, 0.0f};
@@ -194,31 +195,51 @@ void Task_foils_Control(void *ptr)
         //   - MINIATURE_FOILS_ENABLED (compile-time) : 0 = foils toujours
         //     neutres (bring-up moteurs seuls), 1 = PID autorisé.
         //   - sm_active (runtime) : PID appliqué uniquement en RUN/CONTROLE.
-#if MINIATURE_FOILS_ENABLED
-        bool foils_active = sm_active;
-#else
-        bool foils_active = false;
-        (void) sm_active;   // évite le warning quand le PID foils est désactivé
-#endif
+        #if MINIATURE_FOILS_ENABLED
+                bool foils_active = sm_active;
+        #else
+                bool foils_active = false;
+                (void) sm_active;   // évite le warning quand le PID foils est désactivé
+        #endif
 
-        // Hauteur
-        for (int i = 0; i < NB_CANAUX; i++) {
-            hauteur_out[i] = pid_hauteur(i, dist[i], dt);
-        }
+                // Hauteur
+        #if FOIL_HAUTEUR_ACTIVE
+                for (int i = 0; i < NB_CANAUX; i++) {
+                    hauteur_out[i] = pid_hauteur(i, dist[i], dt);
+                }
+        #else
+                for (int i = 0; i < NB_CANAUX; i++) {
+                    hauteur_out[i] = 0.0f;
+                    H_integral[i]  = 0.0f;
+                    H_prev_dist[i] = dist[i];
+                }
+        #endif
 
-        // Pitch et Roll
-        if(xsens_ok == true){
-            pitch_out = pid_pitch(pitch_deg, dt);
-            roll_out = pid_roll (roll_deg,  dt);
-        }
-        else {
-            pitch_out = 0.0f;
-            roll_out = 0.0f;
-        }
-
-        servo_raw[0] = (float)SERVO_NEUTRAL[0] + hauteur_out[0] + pitch_out;              // avant
-        servo_raw[1] = (float)SERVO_NEUTRAL[1] + hauteur_out[1] - pitch_out - roll_out;   // arr. gauche
-        servo_raw[2] = (float)SERVO_NEUTRAL[2] + hauteur_out[2] - pitch_out + roll_out;   // arr. droit
+                // Pitch et Roll
+                if(xsens_ok == true){
+        #if FOIL_PITCH_ACTIVE
+                    pitch_out = pid_pitch(pitch_deg, dt);
+        #else
+                    pitch_out    = 0.0f;
+                    P_integral   = 0.0f;
+                    P_prev_pitch = pitch_deg;
+        #endif
+        #if FOIL_ROLL_ACTIVE
+                    roll_out = pid_roll (roll_deg,  dt);
+        #else
+                    roll_out    = 0.0f;
+                    R_integral  = 0.0f;
+                    R_prev_roll = roll_deg;
+        #endif 
+                }/*
+                else {
+                    pitch_out = 0.0f;
+                    roll_out = 0.0f;
+                }
+        */
+        servo_raw[0] = (float)SERVO_NEUTRAL[0] + SERVO_SENS[0] * (hauteur_out[0] - pitch_out);              // avant
+        servo_raw[1] = (float)SERVO_NEUTRAL[1] + SERVO_SENS[1] * (hauteur_out[1] + pitch_out + roll_out);   // arr. gauche
+        servo_raw[2] = (float)SERVO_NEUTRAL[2] + SERVO_SENS[2] * (hauteur_out[2] + pitch_out - roll_out);   // arr. droit
 
         // MODIF : si le PID n'est pas autorisé, on force le neutre et on
         // remet les intégrateurs à zéro (pas de windup, réentrée propre).
@@ -226,9 +247,12 @@ void Task_foils_Control(void *ptr)
             for (int i = 0; i < NB_CANAUX; i++) {
                 servo_raw[i]  = (float)SERVO_NEUTRAL[i];
                 H_integral[i] = 0.0f;
+                H_prev_dist[i] = dist[i];
             }
             P_integral = 0.0f;
             R_integral = 0.0f;
+            P_prev_pitch = pitch_deg;
+            R_prev_roll  = roll_deg;
         }
 
         for (int i = 0; i < NB_CANAUX; i++) {
@@ -237,7 +261,7 @@ void Task_foils_Control(void *ptr)
             cmd[i]      = cmd_filt[i];
         }
 
-        // MODIF : écriture via le mapping Miniature (usToDeg∘foilToPulse)
+        // MODIF : écriture via le mapping Miniature (usToDegfoilToPulse)
         foilWrite(servo_avant,          cmd[0]);
         foilWrite(servo_arriere_gauche, cmd[1]);
         foilWrite(servo_arriere_droit,  cmd[2]);
