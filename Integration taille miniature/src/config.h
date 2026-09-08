@@ -39,8 +39,8 @@
 //------- FLAGS DE TEST DES FOILS ----------//
 // 1 = terme actif, 0 = terme force a zero
 #define FOIL_HAUTEUR_ACTIVE   1
-#define FOIL_PITCH_ACTIVE     1
-#define FOIL_ROLL_ACTIVE      1
+#define FOIL_PITCH_ACTIVE     0
+#define FOIL_ROLL_ACTIVE      0
 //------------------------------------//
 
 //-------- PERIODE DES TACHES --------//
@@ -94,16 +94,16 @@
 #define SERVO_ALPHA                    0.2f
 // SERVO AVANT
 #define SERVO_AVANT_NEUTRAL            90
-#define SERVO_AVANT_MIN                70
-#define SERVO_AVANT_MAX                125
+#define SERVO_AVANT_MIN                60   //70
+#define SERVO_AVANT_MAX                135  //125
 // SERVO ARRIERE GAUCHE
 #define SERVO_ARRIERE_GAUCHE_NEUTRAL   90
-#define SERVO_ARRIERE_GAUCHE_MIN       70
-#define SERVO_ARRIERE_GAUCHE_MAX       120
+#define SERVO_ARRIERE_GAUCHE_MIN       60  //70
+#define SERVO_ARRIERE_GAUCHE_MAX       130  //120
 // SERVO ARRIERE DROIT
 #define SERVO_ARRIERE_DROIT_NEUTRAL    90
-#define SERVO_ARRIERE_DROIT_MIN        60
-#define SERVO_ARRIERE_DROIT_MAX        110
+#define SERVO_ARRIERE_DROIT_MIN        50  //60
+#define SERVO_ARRIERE_DROIT_MAX        120 //110
 
 // Sens de commande par foil : +1 normal, -1 inverse
 #define SERVO_AVANT_SENS            -1.0f
@@ -124,9 +124,9 @@
 
 
 //--------- HAUTEUR CONTROLE ---------//
-#define H_DISTANCE_REF_AVANT            33.5f
-#define H_DISTANCE_REF_ARRIERE_GAUCHE   32.5f
-#define H_DISTANCE_REF_ARRIERE_DROIT    32.5f
+#define H_DISTANCE_REF_AVANT            38.5f
+#define H_DISTANCE_REF_ARRIERE_GAUCHE   37.5f
+#define H_DISTANCE_REF_ARRIERE_DROIT    37.5f
 
 #define H_DEADBAND_ERR          1.0f
 #define H_DEADBAND_DERIV        0.3f
@@ -135,15 +135,15 @@
 
 // Grande Erreur (>10cm)
 #define H_GRANDE_ERREUR         8.0f
-#define H_KP_HAUT               1.9f
+#define H_KP_HAUT               3.5f
 #define H_KI_HAUT               0.0f
-#define H_KD_HAUT               1.9f
+#define H_KD_HAUT               3.6f
 
 // Moyenne Erreur (>5cm)
 #define H_MOYENNE_ERREUR        4.0f
-#define H_KP_MID                0.6f
+#define H_KP_MID                2.6f
 #define H_KI_MID                0.05f
-#define H_KD_MID                0.4f
+#define H_KD_MID                1.9f
 
 // Petite Erreur
 #define H_KP_BAS                0.4f
@@ -201,6 +201,14 @@
 #define R_KP_BAS              0.4f
 #define R_KI_BAS              0.1f
 #define R_KD_BAS              0.2f
+//------------------------------------//
+
+//--------------- VIRAGE Roll ------------------//
+#define R_REF_FROM_RUDDER      1        // 0 = consigne fixe R_REF_DEG
+#define R_REF_MAX_DEG          8.0f     // gite max, barre a fond pleine vitesse
+#define R_REF_SENS             1.0f     // -1.0f si le bateau penche du mauvais cote
+#define R_REF_ALPHA            0.08f    // filtre sur la consigne (~250 ms a 50 Hz)
+#define R_REF_THR_MIN          0.20f    // en dessous, pas de gite commandee
 //------------------------------------//
 
 //-------------- RÉCEPTEUR FLYSKY (PWM, 5 canaux) -------------------//

@@ -1,6 +1,7 @@
 #include "task_foils_control.h"
 #include "task_sonar.h"
 #include "task_xsens.h"
+#include "task_propulsion.h"
 #include "task_state_machine.h"   // MODIF : accès à SM_foil_control_active (gating)
 
 extern SemaphoreHandle_t dataMutex;
@@ -21,6 +22,7 @@ static float P_deriv      = 0.0f;
 static float R_prev_roll  = 0.0f;
 static float R_integral   = 0.0f;
 static float R_deriv      = 0.0f;
+static float roll_ref_filt = 0.0f;
 
 // ─── Variables partagées (extern dans task_foils_control.h) ─────────────────
 float H_outputs[NB_CANAUX]      = {0.0f, 0.0f, 0.0f};
@@ -28,6 +30,7 @@ float P_output                  =  0.0f;
 float R_output                  =  0.0f;
 float HPR_cmd_servos[NB_CANAUX] = {0.0f, 0.0f, 0.0f};
 float HPR_control_time_us       =  0.0f;
+float R_ref_output              =  0.0f;
 
 // Utilitaires
 static inline float fabs_local(float v) {
@@ -121,9 +124,9 @@ static float pid_pitch(float pitch_deg, float dt)
 }
 
 // PID Fuzzy Roll
-static float pid_roll(float roll_deg, float dt)
+static float pid_roll(float roll_deg, float roll_ref, float dt)
 {
-    float error = R_REF_DEG - roll_deg;
+    float error = roll_ref - roll_deg;
     float absE  = fabs_local(error);
     if (absE < R_DEADBAND_ERR) error = 0.0f;
 
@@ -166,6 +169,8 @@ void Task_foils_Control(void *ptr)
         float dist[NB_CANAUX];
         float pitch_deg = 0.0f;
         float roll_deg  = 0.0f;
+        float rudder_cmd   = 0.0f;
+        float throttle_cmd = 0.0f;
         bool  xsens_ok  = false;
         bool  sm_active = false;             // MODIF : gating machine d'état
         float hauteur_out[NB_CANAUX];
@@ -173,6 +178,7 @@ void Task_foils_Control(void *ptr)
         float roll_out;
         float servo_raw[NB_CANAUX];
         float cmd[NB_CANAUX];
+        
 
         TickType_t now = xTaskGetTickCount();
         float dt = (now - prevTick) * portTICK_PERIOD_MS / 1000.0f;
@@ -188,6 +194,8 @@ void Task_foils_Control(void *ptr)
             roll_deg  = Xsens_data.roll;
             xsens_ok  = Xsens_data.att_valid;
             sm_active = SM_foil_control_active;   // MODIF : lu depuis la machine d'état
+            rudder_cmd   = Prop_rc_rudder;
+            throttle_cmd = Prop_rc_throttle;
             xSemaphoreGive(dataMutex);
         }
 
@@ -202,7 +210,17 @@ void Task_foils_Control(void *ptr)
                 (void) sm_active;   // évite le warning quand le PID foils est désactivé
         #endif
 
-                // Hauteur
+        #if R_REF_FROM_RUDDER
+            float roll_ref_raw = 0.0f;
+            if (throttle_cmd > R_REF_THR_MIN) {
+                roll_ref_raw = R_REF_SENS * R_REF_MAX_DEG * rudder_cmd * throttle_cmd;
+            }
+            roll_ref_filt = R_REF_ALPHA * roll_ref_raw + (1.0f - R_REF_ALPHA) * roll_ref_filt;
+        #else
+            roll_ref_filt = R_REF_DEG;
+        #endif
+
+        // Hauteur
         #if FOIL_HAUTEUR_ACTIVE
                 for (int i = 0; i < NB_CANAUX; i++) {
                     hauteur_out[i] = pid_hauteur(i, dist[i], dt);
@@ -225,18 +243,19 @@ void Task_foils_Control(void *ptr)
                     P_prev_pitch = pitch_deg;
         #endif
         #if FOIL_ROLL_ACTIVE
-                    roll_out = pid_roll (roll_deg,  dt);
+                    roll_out = pid_roll(roll_deg, roll_ref_filt, dt);
         #else
-                    roll_out    = 0.0f;
-                    R_integral  = 0.0f;
-                    R_prev_roll = roll_deg;
-        #endif 
-                }/*
+                    roll_out      = 0.0f;
+                    R_integral    = 0.0f;
+                    R_prev_roll   = roll_deg;
+                    roll_ref_filt = 0.0f;
+        #endif
+                }
                 else {
                     pitch_out = 0.0f;
                     roll_out = 0.0f;
                 }
-        */
+        
         servo_raw[0] = (float)SERVO_NEUTRAL[0] + SERVO_SENS[0] * (hauteur_out[0] - pitch_out);              // avant
         servo_raw[1] = (float)SERVO_NEUTRAL[1] + SERVO_SENS[1] * (hauteur_out[1] + pitch_out + roll_out);   // arr. gauche
         servo_raw[2] = (float)SERVO_NEUTRAL[2] + SERVO_SENS[2] * (hauteur_out[2] + pitch_out - roll_out);   // arr. droit
@@ -253,6 +272,7 @@ void Task_foils_Control(void *ptr)
             R_integral = 0.0f;
             P_prev_pitch = pitch_deg;
             R_prev_roll  = roll_deg;
+            roll_ref_filt = 0.0f;
         }
 
         for (int i = 0; i < NB_CANAUX; i++) {
@@ -276,6 +296,7 @@ void Task_foils_Control(void *ptr)
             }
             P_output             = pitch_out;
             R_output             = roll_out;
+            R_ref_output         = roll_ref_filt;
             HPR_control_time_us  = duree_us;
             xSemaphoreGive(dataMutex);
         }
