@@ -2,6 +2,7 @@
 #include "task_propulsion.h"      // MODIF : snapshot manette (Prop_*)
 #include "task_state_machine.h"   // MODIF : état machine (SM_*) + enums
 
+
 // Mutex défini dans main.cpp
 extern SemaphoreHandle_t dataMutex;
 
@@ -79,6 +80,10 @@ void Task_RPi(void *ptr)
     bool     rc_valid             = false;
     float    temps_tache_prop     = 0.0f;
 
+    float    p_out                = 0.0f;
+    float    r_out                = 0.0f;
+    float    r_ref                = 0.0f;
+
     if (xSemaphoreTake(dataMutex, portMAX_DELAY))
     {
       dist_avant            = Sonar_distance[0];
@@ -100,6 +105,10 @@ void Task_RPi(void *ptr)
       pitch                 = Xsens_data.pitch;
       yaw                   = Xsens_data.yaw;
 
+      p_out                 = P_output;
+      r_out                 = R_output;
+      r_ref                 = R_ref_output;
+
       // MODIF : machine d'état
       sm_top                = SM_top_state;
       sm_run                = SM_run_state;
@@ -120,14 +129,15 @@ void Task_RPi(void *ptr)
     // =====================================================
     // AFFICHAGE SERIAL
     // =====================================================
-    /*
+    
     // --- Sonar ---
     Serial.print("[Sonar]    ");
     Serial.print(temps_tache_sonar, 1);
     Serial.print(" us  |  Dist=");
     Serial.print(dist_avant, 1);
     Serial.println(" cm");
-    */
+    
+   /*
     // --- Controle foils ---
     Serial.print("[Foils]    ");
     Serial.print(temps_tache_H_ctrl, 1);
@@ -137,13 +147,23 @@ void Task_RPi(void *ptr)
     Serial.print(cmd_avant, 1);
     Serial.print("  Cmd_droit=");
     Serial.println(cmd_arriere_droit, 1);
-    
+    */
     // --- IMU attitude ---
     Serial.print("[Xsens]      ");
     Serial.print("Roll=");    Serial.print(roll,  1);
     Serial.print("  Pitch="); Serial.print(pitch, 2);
     Serial.print("  Yaw=");   Serial.print(yaw,   2);
     Serial.println(" deg");
+
+    // --- Roll ---
+    Serial.print("  R_out=");  Serial.print(r_out, 2);
+    Serial.print("  R_ref=");  Serial.print(r_ref, 2);
+    Serial.println(" deg");
+
+    // --- Manette ---
+    Serial.print("[RC]       ");
+    Serial.print("Rudder=");   Serial.print(rc_rudder, 2);
+    Serial.print("  Throttle="); Serial.println(rc_throttle, 2);
     /*
     // --- MODIF : Machine d'état ---
     Serial.print("[SM]       ");
