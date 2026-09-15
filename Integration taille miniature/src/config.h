@@ -40,7 +40,7 @@
 // 1 = terme actif, 0 = terme force a zero
 #define FOIL_HAUTEUR_ACTIVE   1
 #define FOIL_PITCH_ACTIVE     0
-#define FOIL_ROLL_ACTIVE      0
+#define FOIL_ROLL_ACTIVE      1
 //------------------------------------//
 
 //-------- PERIODE DES TACHES --------//
@@ -93,17 +93,17 @@
 //----------------------- SERVOS ----------------------------------//
 #define SERVO_ALPHA                    0.2f
 // SERVO AVANT
-#define SERVO_AVANT_NEUTRAL            90
-#define SERVO_AVANT_MIN                60   //70
-#define SERVO_AVANT_MAX                135  //125
+#define SERVO_AVANT_NEUTRAL            103  //103 neutre
+#define SERVO_AVANT_MIN                80  //70 full lift
+#define SERVO_AVANT_MAX                125  //160 full dive 
 // SERVO ARRIERE GAUCHE
-#define SERVO_ARRIERE_GAUCHE_NEUTRAL   90
-#define SERVO_ARRIERE_GAUCHE_MIN       60  //70
-#define SERVO_ARRIERE_GAUCHE_MAX       130  //120
+#define SERVO_ARRIERE_GAUCHE_NEUTRAL   120  //115 neutre 
+#define SERVO_ARRIERE_GAUCHE_MIN       100  //85 full dive
+#define SERVO_ARRIERE_GAUCHE_MAX       135  //135 full Lift  
 // SERVO ARRIERE DROIT
-#define SERVO_ARRIERE_DROIT_NEUTRAL    90
-#define SERVO_ARRIERE_DROIT_MIN        50  //60
-#define SERVO_ARRIERE_DROIT_MAX        120 //110
+#define SERVO_ARRIERE_DROIT_NEUTRAL    105  //90 neutre 
+#define SERVO_ARRIERE_DROIT_MIN        85  //70 full lift
+#define SERVO_ARRIERE_DROIT_MAX        120  //120 full dive
 
 // Sens de commande par foil : +1 normal, -1 inverse
 #define SERVO_AVANT_SENS            -1.0f
@@ -124,9 +124,9 @@
 
 
 //--------- HAUTEUR CONTROLE ---------//
-#define H_DISTANCE_REF_AVANT            38.5f
-#define H_DISTANCE_REF_ARRIERE_GAUCHE   37.5f
-#define H_DISTANCE_REF_ARRIERE_DROIT    37.5f
+#define H_DISTANCE_REF_AVANT            29.5f
+#define H_DISTANCE_REF_ARRIERE_GAUCHE   32.5f
+#define H_DISTANCE_REF_ARRIERE_DROIT    32.5f
 
 #define H_DEADBAND_ERR          1.0f
 #define H_DEADBAND_DERIV        0.3f
@@ -186,16 +186,16 @@
 #define R_INTEGRAL_MIN       -20.0f
 
 // Grande Erreur
-#define R_GRANDE_ERREUR       10.0f
+#define R_GRANDE_ERREUR       14.0f
 #define R_KP_HAUT             1.6f
 #define R_KI_HAUT             0.0f
 #define R_KD_HAUT             1.9f
 
 // Moyenne Erreur
-#define R_MOYENNE_ERREUR      5.0f
-#define R_KP_MID              0.6f
+#define R_MOYENNE_ERREUR      8.0f
+#define R_KP_MID              1.2f
 #define R_KI_MID              0.05f
-#define R_KD_MID              0.4f
+#define R_KD_MID              0.9f
 
 // Petite Erreur
 #define R_KP_BAS              0.4f
@@ -221,6 +221,12 @@
 
 
 //------------------- ESC (2 moteurs de propulsion) ----------------//
+//---------------- TRIM MOTEURS (calibration G/D) -------------------//
+#define ESC_L_GAIN        1.09f    // était 1.17f
+#define ESC_L_OFFSET_US  -51.0f
+#define ESC_R_GAIN        1.0f     // ne pas toucher
+#define ESC_R_OFFSET_US   0.0f
+#define ESC_TRIM_THR_MIN  0.02f   // sous ce seuil : neutre exact, pas d'offset
 #define ESC_PWM_FREQ_HZ       50
 #define ESC_PULSE_MIN_US      1000      // pleine marche arrière / désarmé
 #define ESC_PULSE_NEUTRAL_US  1500      // stop
@@ -238,8 +244,8 @@
 
 
 //---------------- SEUILS MACHINE D'ÉTAT (fraction throttle) -------//
-#define SM_SPEED_THRESHOLD_HIGH  0.10f   // AVANCE   -> CONTROLE
-#define SM_SPEED_THRESHOLD_LOW   0.085f  // CONTROLE -> AVANCE
+#define SM_SPEED_THRESHOLD_HIGH  0.15f   // AVANCE   -> CONTROLE
+#define SM_SPEED_THRESHOLD_LOW   0.12f  // CONTROLE -> AVANCE
 
 // Sécurité foils : 0 = foils neutres (bring-up moteurs seuls) ;
 //                  1 = PID foils actif en CONTROLE (si tu ajoutes le gating)
