@@ -93,7 +93,7 @@
 //----------------------- SERVOS ----------------------------------//
 #define SERVO_ALPHA                    0.2f
 // SERVO AVANT
-#define SERVO_AVANT_NEUTRAL            103  //103 neutre
+#define SERVO_AVANT_NEUTRAL            100  //103 neutre
 #define SERVO_AVANT_MIN                80  //70 full lift
 #define SERVO_AVANT_MAX                125  //160 full dive 
 // SERVO ARRIERE GAUCHE
@@ -101,8 +101,8 @@
 #define SERVO_ARRIERE_GAUCHE_MIN       100  //85 full dive
 #define SERVO_ARRIERE_GAUCHE_MAX       135  //135 full Lift  
 // SERVO ARRIERE DROIT
-#define SERVO_ARRIERE_DROIT_NEUTRAL    105  //90 neutre 
-#define SERVO_ARRIERE_DROIT_MIN        85  //70 full lift
+#define SERVO_ARRIERE_DROIT_NEUTRAL    103  //90 neutre 
+#define SERVO_ARRIERE_DROIT_MIN        87  //70 full lift
 #define SERVO_ARRIERE_DROIT_MAX        120  //120 full dive
 
 // Sens de commande par foil : +1 normal, -1 inverse
@@ -124,7 +124,7 @@
 
 
 //--------- HAUTEUR CONTROLE ---------//
-#define H_DISTANCE_REF_AVANT            29.5f
+#define H_DISTANCE_REF_AVANT            31.5f
 #define H_DISTANCE_REF_ARRIERE_GAUCHE   32.5f
 #define H_DISTANCE_REF_ARRIERE_DROIT    32.5f
 
@@ -180,22 +180,22 @@
 
 //---------- ROLL CONTROLE ---------//
 #define R_REF_DEG             0.0f    // A changer par la consigne du volant !!!
-#define R_DEADBAND_ERR        1.0f
+#define R_DEADBAND_ERR        2.0f
 #define R_DEADBAND_DERIV      0.3f
 #define R_INTEGRAL_MAX        20.0f
 #define R_INTEGRAL_MIN       -20.0f
 
 // Grande Erreur
-#define R_GRANDE_ERREUR       14.0f
-#define R_KP_HAUT             1.6f
+#define R_GRANDE_ERREUR       12.0f
+#define R_KP_HAUT             2.1f
 #define R_KI_HAUT             0.0f
-#define R_KD_HAUT             1.9f
+#define R_KD_HAUT             2.3f
 
 // Moyenne Erreur
-#define R_MOYENNE_ERREUR      8.0f
-#define R_KP_MID              1.2f
+#define R_MOYENNE_ERREUR      7.0f
+#define R_KP_MID              1.8f
 #define R_KI_MID              0.05f
-#define R_KD_MID              0.9f
+#define R_KD_MID              1.8f
 
 // Petite Erreur
 #define R_KP_BAS              0.4f
