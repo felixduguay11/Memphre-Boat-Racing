@@ -1,5 +1,3 @@
-
-
 #include "Arduino.h"
 #include <math.h>
 
@@ -9,35 +7,48 @@
 //  1 = SIMULATION PURE
 //      Aucun capteur lu, aucun bus CAN, aucun moteur commandé.
 //      Le Teensy ne fait que parler JSON au Pi.
-//      Sûr à flasher avec rien de branché.
 //
-//  0 = MATÉRIEL RÉEL
-//      Réactive le CAN, les switchs, le levier et les VESC.
+//  0 = MATÉRIEL RÉEL  ← MODE ACTUEL
+//      CAN, switchs, levier et VESC actifs.
+//      Tout le code de simulation reste présent mais désactivé
+//      (voir les blocs marqués « SIMULATION » plus bas).
 // ═════════════════════════════════════════════════════════════
-#define USE_FAKE_DATA   1
+#define USE_FAKE_DATA   0
 
 #if !USE_FAKE_DATA
   #include <FlexCAN_T4.h>
   #include <VescCAN_Teensy.h>
 
+  // CAN3 sur Teensy 4.1 = pin 30 (CRX3) / pin 31 (CTX3)
   FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> rawCan1;
   FlexCANAdapter<CAN3> adapterCan1(rawCan1);
   VescCANBus vesc(adapterCan1);
 
-  #define BAUD_RATE   250000   // VESC utilise 250 kbps par défaut
+  #define BAUD_RATE   250000   // VESC : 250 kbps par défaut
 #endif
 
-#define VESC_ID_A   10       // ID du premier ESC  (régler dans VESC Tool)
+#define VESC_ID_A   10       // ID du premier ESC  (réglé dans VESC Tool)
 #define VESC_ID_B   11       // ID du deuxième ESC
 #define PIN_LEVIER_VITESSE 27
 #define PIN_SWITCH_IN 38
 #define PIN_SWITCH_F_R 40
-#define RAMP_STEP 20        // Changement max d'ERPM par cycle (~20ms)
+#define RAMP_STEP 20         // Changement max d'ERPM par cycle (~20ms)
+
+// Au-delà de ce délai sans trame CAN, l'ESC est déclaré absent
+// ("ok":0 dans la trame) → carte grisée côté UI.
+#define VESC_TIMEOUT_MS  500
+
+// Bornes de consigne (eRPM)
+#define ERPM_MAX_FORWARD   8000
+#define ERPM_MAX_REVERSE  -3000
 
 // ─────────────────────────────────────────────────────────────
-//  LIAISON RASPBERRY PI  (USB = Serial)
+//  LIAISON RASPBERRY PI  (USB = Serial = /dev/ttyACM0)
 // ─────────────────────────────────────────────────────────────
-#define DEBUG_PRINT     0     // prints lisibles en plus du JSON (sans UI)
+//  ⚠ DEBUG_PRINT doit rester à 0 tant que l'UI tourne : du texte
+//    libre au milieu du flux JSON est ignoré par l'UI mais pollue
+//    le port. Le mettre à 1 seulement pour debug avec l'app fermée.
+#define DEBUG_PRINT     0
 #define PRINT_MS        1000
 #define TLM_MS          50    // télémétrie : 20 Hz, si streaming
 #define HB_MS           500   // battement de cœur sinon
@@ -67,7 +78,7 @@ void handlePiCommand(const char* line);
 void sendTelemetry();
 void sendHeartbeat();
 void printEscJson(int id);
-void printFakeEscJson(int id, float phase);
+// void printFakeEscJson(int id, float phase);   // ← SIMULATION
 
 const char* modeStr() { return (currentMode == RUN) ? "RUN" : "IDLE"; }
 const char* runStr()  {
@@ -84,13 +95,15 @@ void setup() {
   Serial.begin(115200);       // USB CDC : le débit est ignoré, c'est normal
 
 #if USE_FAKE_DATA
-  // --- SIMULATION : aucun périphérique initialisé ---
-  randomSeed(micros());
+  // ---------- SIMULATION : aucun périphérique initialisé ----------
+  // randomSeed(micros());
 
 #else
-  // --- RÉEL : switchs, CAN, VESC ---
+  // ---------- RÉEL : switchs, levier, CAN, VESC ----------
   pinMode(PIN_SWITCH_IN,  INPUT_PULLDOWN);
   pinMode(PIN_SWITCH_F_R, INPUT_PULLDOWN);
+
+  analogReadResolution(10);   // le map() du levier suppose 0..1023
 
   rawCan1.begin();
   rawCan1.setBaudRate(BAUD_RATE);
@@ -198,19 +211,21 @@ void handlePiCommand(const char* line) {
 // ─────────────────────────────────────────────────────────────
 void sendTelemetry() {
 #if USE_FAKE_DATA
-  static uint32_t n = 0;
-  n++;
-  float phase = (float)n;
-  float erpm  = 3200.0f + sinf(phase / 25.0f) * 450.0f;
-
-  Serial.printf("{\"t\":%lu,\"mode\":\"RUN\",\"run\":\"FORWARD\","
-                "\"target\":%ld,\"ramped\":%ld,\"esc\":[",
-                (unsigned long)millis(),
-                (long)erpm, (long)(erpm * 0.99f));
-  printFakeEscJson(VESC_ID_A, phase);
-  Serial.print(',');
-  printFakeEscJson(VESC_ID_B, phase * 0.98f);
-  Serial.println("]}");
+  // ================= SIMULATION (désactivée) =================
+  // static uint32_t n = 0;
+  // n++;
+  // float phase = (float)n;
+  // float erpm  = 3200.0f + sinf(phase / 25.0f) * 450.0f;
+  //
+  // Serial.printf("{\"t\":%lu,\"mode\":\"RUN\",\"run\":\"FORWARD\","
+  //               "\"target\":%ld,\"ramped\":%ld,\"esc\":[",
+  //               (unsigned long)millis(),
+  //               (long)erpm, (long)(erpm * 0.99f));
+  // printFakeEscJson(VESC_ID_A, phase);
+  // Serial.print(',');
+  // printFakeEscJson(VESC_ID_B, phase * 0.98f);
+  // Serial.println("]}");
+  // ===========================================================
 
 #else
   Serial.printf("{\"t\":%lu,\"mode\":\"%s\",\"run\":\"%s\","
@@ -229,25 +244,30 @@ void sendHeartbeat() {
                 (unsigned long)millis());
 }
 
-// Un ESC, valeurs simulées
-void printFakeEscJson(int id, float phase) {
-  float bruit = (float)random(-200, 201) / 1000.0f;
-  float erpm  = 3200.0f + sinf(phase / 25.0f) * 450.0f;
-  float vin   = 71.0f + sinf(phase / 40.0f) * 1.4f;
-  float iin   = 9.0f  + sinf(phase / 15.0f) * 2.5f + bruit;
 
-  Serial.printf("{\"id\":%d,\"ok\":1,\"erpm\":%ld,\"duty\":%.3f,"
-                "\"i_mot\":%.2f,\"i_in\":%.2f,\"v_in\":%.2f,"
-                "\"t_fet\":%.1f,\"t_mot\":%.1f}",
-                id,
-                (long)erpm,
-                0.42f + sinf(phase / 25.0f) * 0.05f,
-                iin + 1.0f,
-                iin,
-                vin + bruit / 10.0f,
-                42.0f + phase / 4000.0f + bruit,
-                38.0f + phase / 5000.0f + bruit);
-}
+// ═════════════════════════════════════════════════════════════
+//  SIMULATION — conservée pour pouvoir retester sans matériel.
+//  Remettre USE_FAKE_DATA à 1 et décommenter ce bloc + l'appel
+//  dans sendTelemetry() et le prototype en haut du fichier.
+// ═════════════════════════════════════════════════════════════
+// void printFakeEscJson(int id, float phase) {
+//   float bruit = (float)random(-200, 201) / 1000.0f;
+//   float erpm  = 3200.0f + sinf(phase / 25.0f) * 450.0f;
+//   float vin   = 71.0f + sinf(phase / 40.0f) * 1.4f;
+//   float iin   = 9.0f  + sinf(phase / 15.0f) * 2.5f + bruit;
+//
+//   Serial.printf("{\"id\":%d,\"ok\":1,\"erpm\":%ld,\"duty\":%.3f,"
+//                 "\"i_mot\":%.2f,\"i_in\":%.2f,\"v_in\":%.2f,"
+//                 "\"t_fet\":%.1f,\"t_mot\":%.1f}",
+//                 id,
+//                 (long)erpm,
+//                 0.42f + sinf(phase / 25.0f) * 0.05f,
+//                 iin + 1.0f,
+//                 iin,
+//                 vin + bruit / 10.0f,
+//                 42.0f + phase / 4000.0f + bruit,
+//                 38.0f + phase / 5000.0f + bruit);
+// }
 
 
 #if !USE_FAKE_DATA
@@ -255,13 +275,18 @@ void printFakeEscJson(int id, float phase) {
 //  CE QUI SUIT NE COMPILE QU'EN MODE RÉEL
 // ═════════════════════════════════════════════════════════════
 
-// Un ESC, vraies valeurs
+// Un ESC, vraies valeurs.
+// "ok" tombe à 0 si aucune trame CAN depuis VESC_TIMEOUT_MS :
+// isUpdated() seul reste vrai à vie une fois la première trame reçue.
 void printEscJson(int id) {
+  bool vivant = vesc.isUpdated(id) &&
+                (millis() - vesc.lastUpdateMs(id) < VESC_TIMEOUT_MS);
+
   Serial.printf("{\"id\":%d,\"ok\":%d,\"erpm\":%ld,\"duty\":%.3f,"
                 "\"i_mot\":%.2f,\"i_in\":%.2f,\"v_in\":%.2f,"
                 "\"t_fet\":%.1f,\"t_mot\":%.1f}",
                 id,
-                vesc.isUpdated(id) ? 1 : 0,
+                vivant ? 1 : 0,
                 (long)vesc.getERPM(id),
                 vesc.getDutyCycle(id),
                 vesc.getMotorCurrent(id),
@@ -280,22 +305,22 @@ int StateMachine(int target) {
       rampedTarget = max(rampedTarget - RAMP_STEP, (float)target);
     }
 
-    vesc.setERPM(VESC_ID_A, rampedTarget);
-    vesc.setERPM(VESC_ID_B, rampedTarget);
+    vesc.setERPM(VESC_ID_A, (int32_t)rampedTarget);
+    vesc.setERPM(VESC_ID_B, (int32_t)rampedTarget);
 
     lastSendRef = millis();
   }
-  return rampedTarget;
+  return (int)rampedTarget;
 }
 
 int CreateTargetForward(){
   int raw = analogRead(PIN_LEVIER_VITESSE);
-  return map(raw, 0, 1023, 0, 8000);
+  return map(raw, 0, 1023, 0, ERPM_MAX_FORWARD);
 }
 
 int CreateTargetReverse(){
   int raw = analogRead(PIN_LEVIER_VITESSE);
-  return map(raw, 0, 1023, 0, -3000);
+  return map(raw, 0, 1023, 0, ERPM_MAX_REVERSE);
 }
 
 #else

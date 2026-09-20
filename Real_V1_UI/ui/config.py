@@ -10,8 +10,17 @@ from dataclasses import dataclass
 from typing import Callable, List
 
 # ------------------------------------------------------------ liaison
-SERIAL_PORT = "/dev/serial0"
-BAUD = 115200
+# MODE REEL : le Teensy est branche en USB sur le Pi -> /dev/ttyACM0.
+# Le chemin stable (recommande une fois teste) s'obtient avec :
+#     ls /dev/serial/by-id/
+# puis remplacer par p.ex.
+#     SERIAL_PORT = "/dev/serial/by-id/usb-Teensyduino_USB_Serial_XXXXXXX-if00"
+SERIAL_PORT = "/dev/ttyACM0"
+
+# Ancien lien UART (pins 7/8), garde pour memoire :
+# SERIAL_PORT = "/dev/serial0"
+
+BAUD = 115200               # ignore en USB CDC, sans effet
 LINK_TIMEOUT_S = 1.0        # sans trame depuis X s -> lien considere perdu
 SCREEN_W, SCREEN_H = 800, 480
 

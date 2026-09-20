@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """widgets.py — briques reutilisables, sans logique metier."""
 
-from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout, QHBoxLayout
 
 
 class Card(QFrame):

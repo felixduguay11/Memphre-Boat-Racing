@@ -9,6 +9,10 @@ Toutes les implementations exposent la meme interface :
     .start_link() / .stop_link()
 
 Pour ajouter un transport (TCP, MQTT, USB...), sous-classer BaseLink.
+
+MODE REEL : SerialLink est utilise par defaut. SimLink n'est plus
+atteint que via --sim explicite (plus de bascule silencieuse si
+pyserial manque : on veut savoir que le lien est mort).
 """
 
 import json
@@ -37,7 +41,7 @@ class BaseLink(QObject):
         pass
 
 
-# ----------------------------------------------------------------- UART
+# ----------------------------------------------------------------- UART / USB
 class SerialLink(BaseLink):
     """Lit les lignes JSON du Teensy dans un thread dedie."""
 
@@ -82,9 +86,13 @@ class SerialLink(BaseLink):
             if not line.startswith("{"):
                 continue                      # READY, ACK, bruit -> ignore
             try:
-                self.telemetry.emit(json.loads(line))
+                msg = json.loads(line)
             except ValueError:
                 self.status.emit("json invalide: %s" % line[:60])
+                continue
+            if msg.get("type") == "hb":
+                continue                      # heartbeat : pas de telemetrie
+            self.telemetry.emit(msg)
 
     def _open(self) -> bool:
         try:
@@ -116,6 +124,8 @@ class SerialLink(BaseLink):
 
 
 # ----------------------------------------------------------- simulation
+# Conservee : c'est le seul moyen de travailler l'UI sans bateau.
+# Ne tourne plus que sur --sim.
 class SimLink(BaseLink):
     """Fabrique des trames identiques a celles du Teensy, sans materiel."""
 
@@ -161,6 +171,9 @@ class SimLink(BaseLink):
 
 
 def make_link(port: str, baud: int, esc_ids, simulated: bool) -> BaseLink:
-    if simulated or serial is None:
+    if simulated:
         return SimLink(esc_ids)
+    if serial is None:
+        raise RuntimeError(
+            "pyserial absent : pip install pyserial, ou lancer avec --sim")
     return SerialLink(port, baud)
