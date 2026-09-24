@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VESC Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0a0c0f;
+    --bg2:       #111418;
+    --bg3:       #181d24;
+    --border:    #1e2530;
+    --border2:   #2a3444;
+    --accent:    #00d4aa;
+    --accent2:   #0099ff;
+    --warn:      #ff6b35;
+    --text:      #c8d8e8;
+    --text-dim:  #4a5a6a;
+    --text-mono: 'Share Tech Mono', monospace;
+    --text-ui:   'Barlow', sans-serif;
+    --radius:    4px;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--text-ui);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+  }
+
+  header {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    font-family: var(--text-mono);
+    font-size: 18px;
+    color: var(--accent);
+    letter-spacing: 2px;
+    flex-shrink: 0;
+  }
+  .logo span { color: var(--text-dim); }
+
+  .conn-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+  }
+
+  .time-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border);
+    padding-left: 16px;
+  }
+
+  .time-label {
+    font-family: var(--text-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+
+  .time-btn {
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    color: var(--text-dim);
+    font-family: var(--text-mono);
+    font-size: 11px;
+    padding: 4px 9px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .time-btn:hover  { border-color: var(--accent); color: var(--text); }
+  .time-btn.active { border-color: var(--accent); color: var(--accent); }
+
+  select, .btn {
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    font-family: var(--text-mono);
+    font-size: 13px;
+    padding: 6px 12px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  select:hover, .btn:hover { border-color: var(--accent); }
+
+  .btn-connect { border-color: var(--accent); color: var(--accent); font-weight: 600; letter-spacing: 1px; }
+  .btn-connect:hover { background: var(--accent); color: var(--bg); }
+  .btn-connect.connected { border-color: var(--warn); color: var(--warn); }
+  .btn-connect.connected:hover { background: var(--warn); color: var(--bg); }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: background 0.3s;
+    flex-shrink: 0;
+  }
+  .status-dot.on { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+  .status-label { font-family: var(--text-mono); font-size: 12px; color: var(--text-dim); }
+  .status-label.on { color: var(--accent); }
+
+  .main {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    grid-template-rows: 1fr auto;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .sidebar {
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    grid-row: 1 / 3;
+  }
+
+  .section-title {
+    font-family: var(--text-mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    padding: 16px 16px 8px;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .control-group { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+
+  .control-label { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+
+  .control-name { font-family: var(--text-mono); font-size: 12px; color: var(--accent); letter-spacing: 1px; }
+
+  .control-value {
+    font-family: var(--text-mono); font-size: 14px; color: var(--text);
+    background: var(--bg); border: 1px solid var(--border2);
+    border-radius: var(--radius); padding: 2px 8px; width: 80px;
+    text-align: right; outline: none;
+  }
+  .control-value:focus { border-color: var(--accent); }
+
+  .slider-track { padding: 4px 0; }
+
+  input[type=range] {
+    -webkit-appearance: none; width: 100%; height: 4px;
+    background: var(--bg3); border-radius: 2px; outline: none;
+    cursor: pointer; border: 1px solid var(--border2);
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 16px; height: 16px;
+    border-radius: 50%; background: var(--accent);
+    border: 2px solid var(--bg); box-shadow: 0 0 6px var(--accent);
+    cursor: pointer; transition: transform 0.1s;
+  }
+  input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
+
+  .slider-range { display: flex; justify-content: space-between; margin-top: 4px; }
+  .slider-range span { font-family: var(--text-mono); font-size: 10px; color: var(--text-dim); }
+
+  .btn-send {
+    width: 100%; margin-top: 10px; padding: 7px;
+    background: transparent; border: 1px solid var(--accent);
+    color: var(--accent); font-family: var(--text-mono);
+    font-size: 12px; letter-spacing: 1px; border-radius: var(--radius);
+    cursor: pointer; transition: all 0.15s;
+  }
+  .btn-send:hover { background: var(--accent); color: var(--bg); }
+
+  .btn-brake {
+    width: 100%; margin: 8px 0 0; padding: 10px;
+    background: transparent; border: 2px solid var(--warn);
+    color: var(--warn); font-family: var(--text-mono);
+    font-size: 13px; letter-spacing: 2px; border-radius: var(--radius);
+    cursor: pointer; transition: all 0.15s; font-weight: 700;
+  }
+  .btn-brake:hover { background: var(--warn); color: var(--bg); box-shadow: 0 0 16px var(--warn); }
+
+  .telem-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 1px; background: var(--border);
+  }
+  .telem-cell { background: var(--bg2); padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; }
+  .telem-cell-name { font-family: var(--text-mono); font-size: 9px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; }
+  .telem-cell-value { font-family: var(--text-mono); font-size: 16px; color: var(--text); transition: color 0.3s; }
+  .telem-cell-value.updated { color: var(--accent); }
+
+  /* ── CHARTS ── */
+  .charts-area {
+    padding: 12px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    overflow-y: auto;
+    align-content: start;
+  }
+
+  .chart-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px 6px;
+    display: flex;
+    flex-direction: column;
+    height: 210px;
+    position: relative;
+    transition: border-color 0.2s, box-shadow 0.2s, opacity 0.15s;
+    cursor: grab;
+    user-select: none;
+  }
+  .chart-card:active { cursor: grabbing; }
+  .chart-card:hover  { border-color: var(--border2); }
+  .chart-card.flash  { border-color: var(--accent); }
+
+  /* drag handle dots shown on hover */
+  .chart-card::before {
+    content: '⠿';
+    position: absolute;
+    top: 8px; right: 10px;
+    font-size: 13px;
+    color: var(--text-dim);
+    opacity: 0;
+    transition: opacity 0.15s;
+    pointer-events: none;
+  }
+  .chart-card:hover::before { opacity: 0.7; }
+
+  /* dragging: fade source card */
+  .chart-card.dragging  { opacity: 0.3; border-style: dashed; border-color: var(--accent); }
+
+  /* drop target highlight */
+  .chart-card.drag-over {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 2px var(--accent);
+    background: var(--bg3);
+  }
+
+  .chart-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 6px; flex-shrink: 0; pointer-events: none;
+  }
+  .chart-name  { font-family: var(--text-mono); font-size: 11px; color: var(--text-dim); letter-spacing: 1px; }
+  .chart-val   { font-family: var(--text-mono); font-size: 14px; font-weight: 600; color: var(--accent); margin-right: 18px; }
+
+  .chart-wrap  { flex: 1; min-height: 0; position: relative; pointer-events: none; }
+
+  .chart-meta {
+    position: absolute; bottom: 5px; right: 8px;
+    font-family: var(--text-mono); font-size: 9px; color: var(--text-dim);
+    opacity: 0; transition: opacity 0.2s; pointer-events: none;
+  }
+  .chart-card:hover .chart-meta { opacity: 1; }
+
+  /* ── CONSOLE ── */
+  .console-area { border-top: 1px solid var(--border); background: var(--bg); height: 140px; display: flex; flex-direction: column; }
+  .console-header { padding: 6px 16px; background: var(--bg2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .console-log { flex: 1; overflow-y: auto; padding: 6px 16px; font-family: var(--text-mono); font-size: 12px; line-height: 1.7; }
+  .console-log .info { color: var(--text-dim); }
+  .console-log .out  { color: var(--accent2); }
+  .console-log .warn { color: var(--warn); }
+  .console-input-row { display: flex; gap: 8px; padding: 6px 16px; border-top: 1px solid var(--border); flex-shrink: 0; }
+  .console-input { flex: 1; background: var(--bg3); border: 1px solid var(--border2); color: var(--text); font-family: var(--text-mono); font-size: 12px; padding: 5px 10px; border-radius: var(--radius); outline: none; }
+  .console-input:focus { border-color: var(--accent); }
+  .console-input::placeholder { color: var(--text-dim); }
+
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">VESC<span>/</span>DASH</div>
+  <div class="conn-bar">
+    <select id="portSelect"><option value="">-- Port Série --</option></select>
+    <button class="btn" style="padding:6px 10px" onclick="refreshPorts()">↺</button>
+    <select id="baudSelect">
+      <option value="115200" selected>115200</option>
+      <option value="57600">57600</option>
+      <option value="9600">9600</option>
+    </select>
+    <button class="btn btn-connect" id="connectBtn" onclick="toggleConnect()">CONNECT</button>
+    <div class="status-dot" id="statusDot"></div>
+    <span class="status-label" id="statusLabel">Déconnecté</span>
+  </div>
+  <div class="time-bar">
+    <span class="time-label">WINDOW</span>
+    <button class="time-btn active" onclick="setWindow(this,30)"   >30s</button>
+    <button class="time-btn"        onclick="setWindow(this,60)"   >1m</button>
+    <button class="time-btn"        onclick="setWindow(this,300)"  >5m</button>
+    <button class="time-btn"        onclick="setWindow(this,600)"  >10m</button>
+    <button class="time-btn"        onclick="setWindow(this,1800)" >30m</button>
+    <button class="time-btn"        onclick="setWindow(this,0)"    >ALL</button>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="section-title">Contrôles moteur</div>
+
+    <div class="control-group">
+      <div class="control-label">
+        <span class="control-name">CURRENT (A)</span>
+        <input class="control-value" id="val_Current" type="number" value="0" step="0.1" min="-10" max="10" onchange="syncSlider('Current')">
+      </div>
+      <div class="slider-track"><input type="range" id="sl_Current" min="-10" max="10" step="0.1" value="0" oninput="syncValue('Current')"></div>
+      <div class="slider-range"><span>-10 A</span><span>+10 A</span></div>
+      <button class="btn-send" onclick="sendControl('Current')">▶ ENVOYER CURRENT</button>
+    </div>
+
+    <div class="control-group">
+      <div class="control-label">
+        <span class="control-name">RPM</span>
+        <input class="control-value" id="val_RPM" type="number" value="0" step="100" min="-10000" max="10000" onchange="syncSlider('RPM')">
+      </div>
+      <div class="slider-track"><input type="range" id="sl_RPM" min="-10000" max="10000" step="100" value="0" oninput="syncValue('RPM')"></div>
+      <div class="slider-range"><span>-10k</span><span>+10k</span></div>
+      <button class="btn-send" onclick="sendControl('RPM')">▶ ENVOYER RPM</button>
+    </div>
+
+    <div class="control-group">
+      <div class="control-label">
+        <span class="control-name">DUTY CYCLE</span>
+        <input class="control-value" id="val_Duty" type="number" value="0" step="0.01" min="-1" max="1" onchange="syncSlider('Duty')">
+      </div>
+      <div class="slider-track"><input type="range" id="sl_Duty" min="-1" max="1" step="0.01" value="0" oninput="syncValue('Duty')"></div>
+      <div class="slider-range"><span>-1.0</span><span>+1.0</span></div>
+      <button class="btn-send" onclick="sendControl('Duty')">▶ ENVOYER DUTY</button>
+    </div>
+
+    <div class="control-group">
+      <div class="control-label">
+        <span class="control-name">BRAKE (A)</span>
+        <input class="control-value" id="val_BrakeCurrent" type="number" value="0" step="0.1" min="0" max="10" onchange="syncSlider('BrakeCurrent')">
+      </div>
+      <div class="slider-track"><input type="range" id="sl_BrakeCurrent" min="0" max="10" step="0.1" value="0" oninput="syncValue('BrakeCurrent')"></div>
+      <div class="slider-range"><span>0 A</span><span>10 A</span></div>
+      <button class="btn-send" onclick="sendControl('BrakeCurrent')">▶ ENVOYER BRAKE</button>
+    </div>
+
+    <div class="control-group">
+      <button class="btn-brake" onclick="eStop()">⬛ E-STOP</button>
+    </div>
+
+    <div class="section-title">Télémétrie live</div>
+    <div class="telem-grid" id="telemGrid"></div>
+  </div>
+
+  <div class="charts-area" id="chartsArea"></div>
+
+  <div class="console-area">
+    <div class="console-header">
+      <span class="section-title" style="padding:0;border:none;">Console série</span>
+      <button class="btn" style="padding:3px 10px;font-size:11px" onclick="clearConsole()">Effacer</button>
+    </div>
+    <div class="console-log" id="consoleLog"></div>
+    <div class="console-input-row">
+      <input class="console-input" id="consoleInput" placeholder="Commande manuelle (ex: Current=5.0)" onkeydown="if(event.key==='Enter')sendRaw()">
+      <button class="btn btn-send" style="width:auto;padding:5px 14px;margin:0" onclick="sendRaw()">↵ SEND</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const socket = io();
+
+// ── Config ────────────────────────────────────────────────────────────────────
+// ── Config graphiques ───────────────────────────────────────────────────────
+const CHART_VARS = ['RPM', 'DutyCycle', 'InpPower', 'OutPower', 'InpVoltage', 'OutVoltage',
+                  'InpCurrent', 'OutCurrent', 'AmpHours', 'AmpHoursCharged', 'WattHours', 'WattHoursCharged',
+                  'TempMotor', 'TempMosfet', 'TachometerAbs', 'Efficiency',];
+const ALL_VARS     = [...CHART_VARS];
+const CHART_COLORS = ['#00d4aa','#0099ff','#ffcc00','#ff6b35','#cc44ff',
+                      '#44ddff','#ff4488','#88ff44','#ffaa00','#00aaff','#ff6699','#aaffcc'];
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let windowSecs = 30;
+const dataBuffer = {};   // { name: [{t:ms, v:float}] }
+const charts     = {};
+let connected    = false;
+let dragSrc      = null;
+
+// ── Time window ───────────────────────────────────────────────────────────────
+function setWindow(btn, secs) {
+  windowSecs = secs;
+  document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  Object.keys(charts).forEach(redrawChart);
+}
+
+// ── Build telemetry grid ──────────────────────────────────────────────────────
+function buildTelemetryGrid() {
+  const grid = document.getElementById('telemGrid');
+  grid.innerHTML = '';
+  ALL_VARS.forEach(v => {
+    dataBuffer[v] = [];
+    const cell = document.createElement('div');
+    cell.className = 'telem-cell';
+    cell.innerHTML = `<div class="telem-cell-name">${v}</div>
+                      <div class="telem-cell-value" id="tv_${v}">—</div>`;
+    grid.appendChild(cell);
+  });
+}
+
+// ── Build charts ──────────────────────────────────────────────────────────────
+function buildCharts() {
+  const area = document.getElementById('chartsArea');
+  area.innerHTML = '';
+  CHART_VARS.forEach((name, i) => {
+    if (!dataBuffer[name]) dataBuffer[name] = [];
+
+    const card = document.createElement('div');
+    card.className = 'chart-card';
+    card.id = `card_${name}`;
+    card.draggable = true;
+    card.dataset.var = name;
+    card.innerHTML = `
+      <div class="chart-header">
+        <span class="chart-name">${name.toUpperCase()}</span>
+        <span class="chart-val" id="cv_${name}">—</span>
+      </div>
+      <div class="chart-wrap"><canvas id="ch_${name}"></canvas></div>
+      <div class="chart-meta" id="cm_${name}"></div>`;
+    area.appendChild(card);
+
+    card.addEventListener('dragstart', onDragStart);
+    card.addEventListener('dragover',  onDragOver);
+    card.addEventListener('dragleave', onDragLeave);
+    card.addEventListener('drop',      onDrop);
+    card.addEventListener('dragend',   onDragEnd);
+
+    const color = CHART_COLORS[i % CHART_COLORS.length];
+    const ctx   = card.querySelector(`#ch_${name}`).getContext('2d');
+
+    charts[name] = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{ data: [], borderColor: color, backgroundColor: color + '15',
+          borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true }]
+      },
+      options: {
+        animation: false,
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: {
+            display: true,
+            ticks: { color: '#3a4a5a', font: { family:"'Share Tech Mono'", size: 9 },
+                     maxTicksLimit: 5, maxRotation: 0, autoSkip: true },
+            grid: { color: '#151b22' },
+            border: { color: '#1e2530' }
+          },
+          y: {
+            grid: { color: '#1e2530' },
+            ticks: { color: '#4a5a6a', font: { family:"'Share Tech Mono'", size: 10 }, maxTicksLimit: 5 },
+            border: { color: '#1e2530' }
+          }
+        }
+      }
+    });
+  });
+}
+
+// ── Drag & Drop ───────────────────────────────────────────────────────────────
+function onDragStart(e) {
+  dragSrc = this;
+  this.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', this.dataset.var);
+}
+function onDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  if (this !== dragSrc) this.classList.add('drag-over');
+}
+function onDragLeave() { this.classList.remove('drag-over'); }
+function onDrop(e) {
+  e.preventDefault();
+  this.classList.remove('drag-over');
+  if (!dragSrc || this === dragSrc) return;
+  const area  = document.getElementById('chartsArea');
+  const cards = [...area.querySelectorAll('.chart-card')];
+  const si = cards.indexOf(dragSrc);
+  const di = cards.indexOf(this);
+  if (si < di) area.insertBefore(dragSrc, this.nextSibling);
+  else         area.insertBefore(dragSrc, this);
+}
+function onDragEnd() {
+  document.querySelectorAll('.chart-card').forEach(c =>
+    c.classList.remove('dragging', 'drag-over'));
+  dragSrc = null;
+}
+
+// ── Telemetry ─────────────────────────────────────────────────────────────────
+socket.on('telemetry', ({ name, value }) => {
+  const now = Date.now();
+  if (!dataBuffer[name]) dataBuffer[name] = [];
+  dataBuffer[name].push({ t: now, v: value });
+
+  // Keep max 2h to avoid memory bloat
+  const maxKeep = Math.max(windowSecs > 0 ? windowSecs : 7200, 7200) * 1000;
+  const cutoff  = now - maxKeep;
+  while (dataBuffer[name].length > 1 && dataBuffer[name][0].t < cutoff)
+    dataBuffer[name].shift();
+
+  // Live tile
+  const el = document.getElementById(`tv_${name}`);
+  if (el) {
+    el.textContent = fmtVal(name, value);
+    el.classList.add('updated');
+    setTimeout(() => el.classList.remove('updated'), 400);
+  }
+
+  // Chart
+  if (charts[name]) {
+    redrawChart(name);
+    const cv = document.getElementById(`cv_${name}`);
+    if (cv) cv.textContent = fmtVal(name, value);
+    const card = document.getElementById(`card_${name}`);
+    if (card) { card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 250); }
+  }
+});
+
+// ── Redraw a single chart from buffer ────────────────────────────────────────
+function redrawChart(name) {
+  const chart = charts[name];
+  const buf   = dataBuffer[name];
+  if (!chart || !buf || buf.length === 0) return;
+
+  const now    = Date.now();
+  const cutoff = windowSecs > 0 ? now - windowSecs * 1000 : 0;
+  const slice  = windowSecs > 0 ? buf.filter(p => p.t >= cutoff) : buf;
+  if (slice.length === 0) return;
+
+  // Downsample to 500 pts max for smooth perf
+  let pts = slice;
+  if (slice.length > 500) {
+    const step = Math.ceil(slice.length / 500);
+    pts = slice.filter((_, i) => i % step === 0);
+  }
+
+  chart.data.labels            = pts.map(p => fmtTime(p.t));
+  chart.data.datasets[0].data  = pts.map(p => p.v);
+  chart.update('none');
+
+  // Meta hint (span + sample count)
+  const meta = document.getElementById(`cm_${name}`);
+  if (meta && pts.length > 1) {
+    const spanSec = (pts[pts.length - 1].t - pts[0].t) / 1000;
+    meta.textContent = fmtSpan(spanSec) + ' · ' + pts.length + ' pts';
+  }
+}
+
+function fmtTime(ms) {
+  const d = new Date(ms);
+  return windowSecs > 0 && windowSecs <= 120
+    ? d.toLocaleTimeString('fr-CA', { hour:'2-digit', minute:'2-digit', second:'2-digit' })
+    : d.toLocaleTimeString('fr-CA', { hour:'2-digit', minute:'2-digit' });
+}
+
+function fmtSpan(sec) {
+  if (sec < 60)   return Math.round(sec) + 's';
+  if (sec < 3600) return (sec / 60).toFixed(1) + 'm';
+  return (sec / 3600).toFixed(2) + 'h';
+}
+
+function fmtVal(name, value) {
+  if (name === 'RPM')             return Math.round(value).toLocaleString() + ' RPM';
+  if (name === 'Efficiency')      return value.toFixed(2) + ' %';
+  if (name === 'DutyCycle')       return (value * 100).toFixed(2) + ' %';
+  if (name === 'TachometerAbs')   return Math.round(value).toLocaleString();
+  if (name.includes('Voltage'))   return value.toFixed(2) + ' V';
+  if (name.includes('Current'))   return value.toFixed(5) + ' A';  // ← was toFixed(8)
+  if (name.includes('Power'))     return value.toFixed(2) + ' W';  // ← was toFixed(6)
+  if (name.includes('AmpHours'))  return value.toFixed(5) + ' Ah';
+  if (name.includes('WattHours')) return value.toFixed(2) + ' Wh';
+  if (name.includes('Temp'))      return value.toFixed(1) + ' °C';
+  return value.toFixed(3);
+}
+
+// ── Console ───────────────────────────────────────────────────────────────────
+socket.on('console', d => addConsole(d.msg, 'info'));
+
+function addConsole(msg, cls = 'info') {
+  const log  = document.getElementById('consoleLog');
+  const line = document.createElement('div');
+  line.className = cls;
+  line.textContent = `[${new Date().toLocaleTimeString('fr-CA')}] ${msg}`;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+  while (log.children.length > 200) log.removeChild(log.firstChild);
+}
+function clearConsole() { document.getElementById('consoleLog').innerHTML = ''; }
+
+// ── Port / Connection ─────────────────────────────────────────────────────────
+socket.on('port_list', ({ ports }) => {
+  const sel = document.getElementById('portSelect');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">-- Port Série --</option>';
+  ports.forEach(p => {
+    const o = document.createElement('option');
+    o.value = p; o.textContent = p;
+    if (p === cur) o.selected = true;
+    sel.appendChild(o);
+  });
+});
+function refreshPorts() { socket.emit('list_ports'); }
+
+socket.on('connection_status', ({ connected: c, port }) => {
+  connected = c;
+  const dot = document.getElementById('statusDot');
+  const lbl = document.getElementById('statusLabel');
+  const btn = document.getElementById('connectBtn');
+  if (c) {
+    dot.classList.add('on'); lbl.classList.add('on');
+    lbl.textContent = port || 'Connecté';
+    btn.classList.add('connected'); btn.textContent = 'DISCONNECT';
+  } else {
+    dot.classList.remove('on'); lbl.classList.remove('on');
+    lbl.textContent = 'Déconnecté';
+    btn.classList.remove('connected'); btn.textContent = 'CONNECT';
+  }
+});
+
+function toggleConnect() {
+  if (connected) { socket.emit('close_port'); return; }
+  const port = document.getElementById('portSelect').value;
+  const baud = document.getElementById('baudSelect').value;
+  if (!port) { addConsole('⚠️ Sélectionne un port série', 'warn'); return; }
+  socket.emit('open_port', { port, baud });
+}
+
+// ── Sliders ───────────────────────────────────────────────────────────────────
+function syncValue(name) {
+  const sl = document.getElementById(`sl_${name}`);
+  const vl = document.getElementById(`val_${name}`);
+  if (sl && vl) vl.value = sl.value;
+}
+function syncSlider(name) {
+  const sl = document.getElementById(`sl_${name}`);
+  const vl = document.getElementById(`val_${name}`);
+  if (!sl || !vl) return;
+  let v = Math.min(Math.max(parseFloat(vl.value), parseFloat(sl.min)), parseFloat(sl.max));
+  sl.value = v; vl.value = v;
+}
+function sendControl(name) {
+  const vl = document.getElementById(`val_${name}`);
+  if (!vl) return;
+  const cmd = `${name}=${vl.value}`;
+  socket.emit('send_command', { cmd });
+  addConsole(`→ ${cmd}`, 'out');
+}
+function eStop() {
+  socket.emit('send_command', { cmd: 'Current=0' });
+  ['Current','RPM','Duty','BrakeCurrent'].forEach(n => {
+    const sl = document.getElementById(`sl_${n}`);
+    const vl = document.getElementById(`val_${n}`);
+    if (sl) sl.value = 0;
+    if (vl) vl.value = 0;
+  });
+  addConsole('⬛ E-STOP — Current=0 envoyé', 'warn');
+}
+function sendRaw() {
+  const inp = document.getElementById('consoleInput');
+  const cmd = inp.value.trim();
+  if (!cmd) return;
+  socket.emit('send_command', { cmd });
+  addConsole(`→ ${cmd}`, 'out');
+  inp.value = '';
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+buildTelemetryGrid();
+buildCharts();
+addConsole('Dashboard VESC prêt. Sélectionne un port et clique CONNECT.');
+</script>
+</body>
+</html>

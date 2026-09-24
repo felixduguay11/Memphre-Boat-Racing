@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "../Documents/Memphre-Boat-Racing/lib"
+		},
+		{
+			"name": "TeensyFreeRTOS",
+			"path": "../Documents/TeensyFreeRTOS"
+		},
+		{
+			"name": "Teensy41FreeRTOS",
+			"path": "../Documents/Teensy41FreeRTOS"
+		}
+	],
+	"settings": {}
+}

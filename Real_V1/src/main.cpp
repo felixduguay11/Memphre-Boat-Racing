@@ -1,71 +1,129 @@
 #include "Arduino.h"
-#include <FlexCAN_T4.h>
-#include <VescCAN_Teensy.h>
+#include <math.h>
 
-FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> rawCan1;
-FlexCANAdapter<CAN3> adapterCan1(rawCan1);
-VescCANBus vesc(adapterCan1);
+// ═════════════════════════════════════════════════════════════
+//  MODE DE FONCTIONNEMENT
+// ═════════════════════════════════════════════════════════════
+//  1 = SIMULATION PURE
+//      Aucun capteur lu, aucun bus CAN, aucun moteur commandé.
+//      Le Teensy ne fait que parler JSON au Pi.
+//
+//  0 = MATÉRIEL RÉEL  ← MODE ACTUEL
+//      CAN, switchs, levier et VESC actifs.
+//      Tout le code de simulation reste présent mais désactivé
+//      (voir les blocs marqués « SIMULATION » plus bas).
+// ═════════════════════════════════════════════════════════════
+#define USE_FAKE_DATA   0
 
-#define BAUD_RATE   250000   // VESC utilise 250 kbps par défaut
-#define COMM_RATE   50      // Intervalle d'envoi de commandes (ms)
-#define PRINT_MS    1000     // Intervalle d'affichage Serial (ms)  <-- AJOUT
-#define VESC_ID_A   10       // ID du premier ESC  (régler dans VESC Tool)
-#define VESC_ID_B   11       // ID du deuxième ESC (si présent)
+#if !USE_FAKE_DATA
+  #include <FlexCAN_T4.h>
+  #include <VescCAN_Teensy.h>
+
+  // CAN3 sur Teensy 4.1 = pin 30 (CRX3) / pin 31 (CTX3)
+  FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> rawCan1;
+  FlexCANAdapter<CAN3> adapterCan1(rawCan1);
+  VescCANBus vesc(adapterCan1);
+
+  #define BAUD_RATE   250000   // VESC : 250 kbps par défaut
+#endif
+
+#define VESC_ID_A   10       // ID du premier ESC  (réglé dans VESC Tool)
+#define VESC_ID_B   11       // ID du deuxième ESC
 #define PIN_LEVIER_VITESSE 27
 #define PIN_SWITCH_IN 38
 #define PIN_SWITCH_F_R 40
-#define RAMP_STEP 20        // Changement max d'ERPM par cycle StateMachine (~20ms) -> limite l'accélération, évite un saut brusque forward/reverse. À ajuster selon ton application.
+#define RAMP_STEP 20         // Changement max d'ERPM par cycle (~20ms)
 
-enum ControlMode {
-  IDLE,
-  RUN
-};
+// Au-delà de ce délai sans trame CAN, l'ESC est déclaré absent
+// ("ok":0 dans la trame) → carte grisée côté UI.
+#define VESC_TIMEOUT_MS  500
 
-enum RunMode {
-  FORWARD,
-  REVERSE,
-  NEUTRAL
-};
-  
-ControlMode currentMode = IDLE;
-RunMode currentRunMode = NEUTRAL;
-float lastSendRef = 0;
-int target = 0;
+// Bornes de consigne (eRPM)
+#define ERPM_MAX_FORWARD   8000
+#define ERPM_MAX_REVERSE  -3000
+
+// ─────────────────────────────────────────────────────────────
+//  LIAISON RASPBERRY PI  (USB = Serial = /dev/ttyACM0)
+// ─────────────────────────────────────────────────────────────
+//  ⚠ DEBUG_PRINT doit rester à 0 tant que l'UI tourne : du texte
+//    libre au milieu du flux JSON est ignoré par l'UI mais pollue
+//    le port. Le mettre à 1 seulement pour debug avec l'app fermée.
+#define DEBUG_PRINT     0
+#define PRINT_MS        1000
+#define TLM_MS          50    // télémétrie : 20 Hz, si streaming
+#define HB_MS           500   // battement de cœur sinon
+#define PI_LINE_MAX     96
+
+bool     streaming   = false;   // passe à true sur {"cmd":"start"}
+uint32_t lastTlmMs   = 0;
+uint32_t lastBeatMs  = 0;
+uint32_t lastPrintMs = 0;
+char     piLine[PI_LINE_MAX];
+uint8_t  piIdx       = 0;
+
+enum ControlMode { IDLE, RUN };
+enum RunMode     { FORWARD, REVERSE, NEUTRAL };
+
+ControlMode currentMode    = IDLE;
+RunMode     currentRunMode = NEUTRAL;
+float lastSendRef  = 0;
+int   target       = 0;
 float rampedTarget = 0;   // valeur réellement envoyée, lissée vers "target"
-unsigned long lastSendA = 0;
-unsigned long lastSendB = 0;
-uint32_t lastPrintMs = 0;                 // <-- AJOUT : cadence l'affichage Serial
-int StateMachine(int target);
-int CreateTargetForward();
-int CreateTargetReverse();
-void printVescValuesSerial(int id, float rampedTarget, RunMode currentRunMode);       // <-- AJOUT
 
+int  StateMachine(int target);
+int  CreateTargetForward();
+int  CreateTargetReverse();
+void readPiCommands();
+void handlePiCommand(const char* line);
+void sendTelemetry();
+void sendHeartbeat();
+void printEscJson(int id);
+// void printFakeEscJson(int id, float phase);   // ← SIMULATION
 
-void setup() {
-  Serial.begin(9600);       // debug USB
-  pinMode(PIN_SWITCH_IN, INPUT_PULLDOWN);
-  pinMode(PIN_SWITCH_F_R, INPUT_PULLDOWN);
-
-  while (!Serial && millis() < 3000);
-
-  rawCan1.begin();            // Initialisation bus CAN 1
-  rawCan1.setBaudRate(BAUD_RATE);
-  vesc.begin();               // initialise les structures internes
-
-  Serial.println("=== VESC CAN Teensy 4.1 — Prêt ===");
-  Serial.printf("CAN1 @ %u bps | ESCs surveillés : %u, %u\n\n",
-                BAUD_RATE, VESC_ID_A, VESC_ID_B);
+const char* modeStr() { return (currentMode == RUN) ? "RUN" : "IDLE"; }
+const char* runStr()  {
+  switch (currentRunMode) {
+    case FORWARD: return "FORWARD";
+    case REVERSE: return "REVERSE";
+    default:      return "NEUTRAL";
+  }
 }
 
-void loop() {
-  // ── 1. Mise à jour lecture CAN ────────────────────────────────
-  vesc.update();   // draine tous les messages en attente
 
-  // ── 2. Lecture des switchs à chaque passage (plus de while bloquant) ──
+// ═════════════════════════════════════════════════════════════
+void setup() {
+  Serial.begin(115200);       // USB CDC : le débit est ignoré, c'est normal
+
+#if USE_FAKE_DATA
+  // ---------- SIMULATION : aucun périphérique initialisé ----------
+  // randomSeed(micros());
+
+#else
+  // ---------- RÉEL : switchs, levier, CAN, VESC ----------
+  pinMode(PIN_SWITCH_IN,  INPUT_PULLDOWN);
+  pinMode(PIN_SWITCH_F_R, INPUT_PULLDOWN);
+
+  analogReadResolution(10);   // le map() du levier suppose 0..1023
+
+  rawCan1.begin();
+  rawCan1.setBaudRate(BAUD_RATE);
+  vesc.begin();
+#endif
+}
+
+
+// ═════════════════════════════════════════════════════════════
+void loop() {
+
+#if !USE_FAKE_DATA
+  // ── 1. Lecture CAN — toujours, sinon le buffer déborde ──────
+  vesc.update();
+
+  // ── 2. Lecture des switchs et du levier ────────────────────
   if (digitalRead(PIN_SWITCH_IN) == HIGH) {
-    currentMode = IDLE;
+    currentMode    = IDLE;
     currentRunMode = NEUTRAL;
-    target = 0;
+    target         = 0;
   } else {
     currentMode = RUN;
     if (digitalRead(PIN_SWITCH_F_R) == LOW) {
@@ -77,16 +135,166 @@ void loop() {
     }
   }
 
+  // ── 3. Moteurs — indépendant du streaming ──────────────────
+  //     Si le Pi plante, le bateau répond quand même au levier.
   StateMachine(target);
+#endif
 
-  // ── 3. Affichage périodique des valeurs moteur sur le Serial ──  <-- AJOUT
+  // ── 4. Commandes du Pi — non bloquant ──────────────────────
+  readPiCommands();
+
+  // ── 5. Sortie vers le Pi ───────────────────────────────────
+  if (streaming) {
+    if (millis() - lastTlmMs >= TLM_MS) {
+      lastTlmMs = millis();
+      sendTelemetry();
+    }
+  } else {
+    if (millis() - lastBeatMs >= HB_MS) {
+      lastBeatMs = millis();
+      sendHeartbeat();
+    }
+  }
+
+#if DEBUG_PRINT && !USE_FAKE_DATA
   if (millis() - lastPrintMs >= PRINT_MS) {
     lastPrintMs = millis();
-    printVescValuesSerial(VESC_ID_A, rampedTarget, currentRunMode);
-    printVescValuesSerial(VESC_ID_B, rampedTarget, currentRunMode);
+    Serial.printf("[dbg] mode=%s run=%s target=%d ramped=%.0f\n",
+                  modeStr(), runStr(), target, rampedTarget);
+  }
+#endif
+}
+
+
+// ─────────────────────────────────────────────────────────────
+//  Lecture non bloquante des commandes du Pi
+// ─────────────────────────────────────────────────────────────
+void readPiCommands() {
+  while (Serial.available()) {
+    char c = Serial.read();
+
+    if (c == '\r') continue;
+
+    if (c == '\n') {
+      piLine[piIdx] = '\0';
+      if (piIdx > 0) handlePiCommand(piLine);
+      piIdx = 0;
+    }
+    else if (piIdx < PI_LINE_MAX - 1) {
+      piLine[piIdx++] = c;
+    }
+    else {
+      piIdx = 0;   // ligne trop longue : on jette
+    }
   }
 }
 
+// Parsing volontairement minimal : on cherche la valeur de "cmd".
+void handlePiCommand(const char* line) {
+  const char* p = strstr(line, "\"cmd\"");
+  if (!p) return;
+
+  if (strstr(p, "start")) {
+    streaming  = true;
+    lastTlmMs  = millis();
+    // Les gains PID arriveront ici plus tard (clé "pid").
+  }
+  else if (strstr(p, "stop")) {
+    streaming  = false;
+    lastBeatMs = millis();
+  }
+}
+
+
+// ─────────────────────────────────────────────────────────────
+//  Émission de la télémétrie — format contractuel avec l'UI
+// ─────────────────────────────────────────────────────────────
+void sendTelemetry() {
+#if USE_FAKE_DATA
+  // ================= SIMULATION (désactivée) =================
+  // static uint32_t n = 0;
+  // n++;
+  // float phase = (float)n;
+  // float erpm  = 3200.0f + sinf(phase / 25.0f) * 450.0f;
+  //
+  // Serial.printf("{\"t\":%lu,\"mode\":\"RUN\",\"run\":\"FORWARD\","
+  //               "\"target\":%ld,\"ramped\":%ld,\"esc\":[",
+  //               (unsigned long)millis(),
+  //               (long)erpm, (long)(erpm * 0.99f));
+  // printFakeEscJson(VESC_ID_A, phase);
+  // Serial.print(',');
+  // printFakeEscJson(VESC_ID_B, phase * 0.98f);
+  // Serial.println("]}");
+  // ===========================================================
+
+#else
+  Serial.printf("{\"t\":%lu,\"mode\":\"%s\",\"run\":\"%s\","
+                "\"target\":%ld,\"ramped\":%ld,\"esc\":[",
+                (unsigned long)millis(), modeStr(), runStr(),
+                (long)target, (long)rampedTarget);
+  printEscJson(VESC_ID_A);
+  Serial.print(',');
+  printEscJson(VESC_ID_B);
+  Serial.println("]}");
+#endif
+}
+
+void sendHeartbeat() {
+  Serial.printf("{\"type\":\"hb\",\"state\":\"idle\",\"t\":%lu}\n",
+                (unsigned long)millis());
+}
+
+
+// ═════════════════════════════════════════════════════════════
+//  SIMULATION — conservée pour pouvoir retester sans matériel.
+//  Remettre USE_FAKE_DATA à 1 et décommenter ce bloc + l'appel
+//  dans sendTelemetry() et le prototype en haut du fichier.
+// ═════════════════════════════════════════════════════════════
+// void printFakeEscJson(int id, float phase) {
+//   float bruit = (float)random(-200, 201) / 1000.0f;
+//   float erpm  = 3200.0f + sinf(phase / 25.0f) * 450.0f;
+//   float vin   = 71.0f + sinf(phase / 40.0f) * 1.4f;
+//   float iin   = 9.0f  + sinf(phase / 15.0f) * 2.5f + bruit;
+//
+//   Serial.printf("{\"id\":%d,\"ok\":1,\"erpm\":%ld,\"duty\":%.3f,"
+//                 "\"i_mot\":%.2f,\"i_in\":%.2f,\"v_in\":%.2f,"
+//                 "\"t_fet\":%.1f,\"t_mot\":%.1f}",
+//                 id,
+//                 (long)erpm,
+//                 0.42f + sinf(phase / 25.0f) * 0.05f,
+//                 iin + 1.0f,
+//                 iin,
+//                 vin + bruit / 10.0f,
+//                 42.0f + phase / 4000.0f + bruit,
+//                 38.0f + phase / 5000.0f + bruit);
+// }
+
+
+#if !USE_FAKE_DATA
+// ═════════════════════════════════════════════════════════════
+//  CE QUI SUIT NE COMPILE QU'EN MODE RÉEL
+// ═════════════════════════════════════════════════════════════
+
+// Un ESC, vraies valeurs.
+// "ok" tombe à 0 si aucune trame CAN depuis VESC_TIMEOUT_MS :
+// isUpdated() seul reste vrai à vie une fois la première trame reçue.
+void printEscJson(int id) {
+  bool vivant = vesc.isUpdated(id) &&
+                (millis() - vesc.lastUpdateMs(id) < VESC_TIMEOUT_MS);
+
+  Serial.printf("{\"id\":%d,\"ok\":%d,\"erpm\":%ld,\"duty\":%.3f,"
+                "\"i_mot\":%.2f,\"i_in\":%.2f,\"v_in\":%.2f,"
+                "\"t_fet\":%.1f,\"t_mot\":%.1f}",
+                id,
+                vivant ? 1 : 0,
+                (long)vesc.getERPM(id),
+                vesc.getDutyCycle(id),
+                vesc.getMotorCurrent(id),
+                vesc.getCurrentIn(id),
+                vesc.getVoltageIn(id),
+                vesc.getTempFET(id),
+                vesc.getTempMotor(id));
+}
 
 int StateMachine(int target) {
   if (millis() - lastSendRef > 20) {
@@ -97,118 +305,28 @@ int StateMachine(int target) {
       rampedTarget = max(rampedTarget - RAMP_STEP, (float)target);
     }
 
-    switch (currentMode) {
-      case IDLE:
-        vesc.setERPM(VESC_ID_A, rampedTarget);
-        vesc.setERPM(VESC_ID_B, rampedTarget);
-        //Serial.print("IDLE    ");
-        //Serial.println(rampedTarget);
-        break;
-      case RUN:
-        switch(currentRunMode){
-          case NEUTRAL:
-            vesc.setERPM(VESC_ID_A, rampedTarget);
-            vesc.setERPM(VESC_ID_B, rampedTarget);
-            // Serial.print("NEUTRAL");
-            break;
-          case FORWARD:
-            vesc.setERPM(VESC_ID_A, rampedTarget);
-            vesc.setERPM(VESC_ID_B, rampedTarget);
-            //Serial.print("FORWARD    ");
-            //Serial.println(rampedTarget);
-            break;
-          case REVERSE:
-            vesc.setERPM(VESC_ID_A, rampedTarget);
-            vesc.setERPM(VESC_ID_B, rampedTarget);
-            //Serial.print("REVERSE    ");
-            //Serial.println(rampedTarget);
-            break;
-        }
-    }
+    vesc.setERPM(VESC_ID_A, (int32_t)rampedTarget);
+    vesc.setERPM(VESC_ID_B, (int32_t)rampedTarget);
+
     lastSendRef = millis();
   }
-  return rampedTarget;
+  return (int)rampedTarget;
 }
 
 int CreateTargetForward(){
   int raw = analogRead(PIN_LEVIER_VITESSE);
-  //raw = constrain(raw, 100, 1023);   // évite l'extrapolation de map() hors plage
-  int desired_speed = map(raw, 0, 1023, 0, 8000);
-  return desired_speed;
+  return map(raw, 0, 1023, 0, ERPM_MAX_FORWARD);
 }
 
 int CreateTargetReverse(){
   int raw = analogRead(PIN_LEVIER_VITESSE);
-  //raw = constrain(raw, 100, 1023);   // évite l'extrapolation de map() hors plage
-  int desired_speed = map(raw, 0, 1023, 0, -3000);
-  return desired_speed;
+  return map(raw, 0, 1023, 0, ERPM_MAX_REVERSE);
 }
 
-// ─────────────────────────────────────────────────────────────
-//  Print dans le serial les valeurs des ESCs
-//  (repris de vesc_can_reader_v4)
-// ─────────────────────────────────────────────────────────────
-void printVescValuesSerial(int id, float rampedTarget, RunMode currentRunMode) {
-  if (!vesc.isUpdated(id)) {                                    // <-- AJOUT
-    Serial.printf("[ESC %u] Aucune donnée reçue.\n", id);       // <-- AJOUT
-    return;                                                     // <-- AJOUT
-  }
-  Serial.print("\n==================================================================================================================================\n");
-  Serial.printf("[ESC %u] eRPM=%-8ld  I=%.2f A  Duty=%.1f%%  "
-    "Vin=%.1f V  FET=%.1f°C  Mot=%.1f°C\n", id,
-    vesc.getERPM(id),
-    vesc.getMotorCurrent(id),
-    vesc.getDutyCycle(id) * 100.0f,
-    vesc.getVoltageIn(id),
-    vesc.getTempFET(id),
-    vesc.getTempMotor(id)
-  );
-
-// ── Calculs ────────────────────────────────────────────
-  float inpVoltage    = vesc.getVoltageIn(id);
-  float inpCurrent    = vesc.getCurrentIn(id);
-  float outCurrent    = vesc.getMotorCurrent(id);
-  float duty          = vesc.getDutyCycle(id);
-  float rpm           = vesc.getRPM(id, 6);
-  float erpm          = vesc.getERPM(id);
-  float tachometerAbs = vesc.getTachometer(id);
-  float tempMotor     = vesc.getTempMotor(id);
-  float tempMosfet    = vesc.getTempFET(id);
-  float inpampHours   = vesc.getAmpHours(id);
-  float outampHours   = vesc.getAmpHoursChg(id);
-  float inpwattHours  = vesc.getWattHours(id);
-  float outwattHours  = vesc.getWattHoursChg(id); 
-
-    // Tension moteur estimée (Vbatt × duty)
-  float outVoltage  = inpVoltage * duty;
-
-  // Puissances
-  float inpPower    = inpVoltage * inpCurrent;
-  float outPower    = outVoltage * outCurrent;
-
-  // Efficacité (évite division par zéro)
-  float efficiency_wh  = 0;
-  float efficiency =0;
-  if (inpampHours > 0.2) {
-    efficiency_wh = (outwattHours / inpwattHours) * 100.0;
-    efficiency_wh = constrain(efficiency_wh, 0, 100);
-    efficiency = (outPower / inpPower) * 100.0;
-  }
-
-
-  Serial.print(__TIME__);
-  Serial.print("\n");
-  Serial.printf(">RPM:%.2f\t\t>ERPM:%.2f\t\t>DutyCycle:%.2f\t\t>TachometerAbs:%.2f\t\t>TempMotor:%.2f\t\t>TempMosfet:%.2f\n", 
-    rpm, erpm, duty, tachometerAbs, tempMotor, tempMosfet);
-  
-  Serial.printf(">InpVoltage:%.2f\t\t>InpCurrent:%.2f\t\t>InpPower:%.2f\t\t>InpAmpHours:%.3f\t\t>InpWattHours:%.3f\n", 
-    inpVoltage, inpCurrent, inpPower, inpampHours, inpwattHours);
-
-  Serial.printf(">OutVoltage:%.2f\t\t>OutCurrent:%.2f\t\t>OutPower:%.2f\t\t>OutAmpHours:%.3f\t\t>OutWattHours:%.3f\n", 
-    outVoltage, outCurrent, outPower, outampHours, outwattHours);
-
-  Serial.printf(">Efficiency(Wh):%.2f\t\t>Efficiency(W):%.2f\n", efficiency_wh*100, efficiency*100);
-  const char* runModeStr[] = { "FORWARD", "REVERSE", "NEUTRAL" };
-  Serial.printf(">rampedTarget(ERPM):%.2f\n", rampedTarget);
-  Serial.printf("Mode actuel: %s\n", runModeStr[currentRunMode]);
-}
+#else
+// Souches vides : le projet compile en simulation sans matériel.
+void printEscJson(int)     { }
+int  StateMachine(int)     { return 0; }
+int  CreateTargetForward() { return 0; }
+int  CreateTargetReverse() { return 0; }
+#endif
