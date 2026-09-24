@@ -36,7 +36,7 @@
 
 //-------------- SONARS --------------//
 #define SONAR_VREF          3.3f
-#define SONAR_ADC_BITS      4095.0f
+#define SONAR_ADC_BITS      1024.0f
 #define SONAR_RESISTANCE    150.0f
 #define SONAR_I_MIN_MA      4.0f
 #define SONAR_I_MAX_MA      20.0f

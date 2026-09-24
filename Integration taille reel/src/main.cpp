@@ -21,7 +21,7 @@ void setup()
   Serial.begin(9600);
 
   // ADC 12 bits — obligatoire sur Teensy 4.1
-  analogReadResolution(12);
+  analogReadResolution(10);
 
   dataMutex = xSemaphoreCreateMutex();
 
