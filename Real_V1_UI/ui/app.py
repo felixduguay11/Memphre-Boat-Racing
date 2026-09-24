@@ -13,6 +13,7 @@ from . import config as cfg
 from .theme import QSS, PALETTE
 from .link import make_link
 from .screens import StartScreen, TelemetryScreen
+from .logger import TelemetryLogger
 
 
 class MainWindow(QStackedWidget):
@@ -33,21 +34,28 @@ class MainWindow(QStackedWidget):
 
         self.setFixedSize(cfg.SCREEN_W, cfg.SCREEN_H)
         self.setWindowTitle(title)
+        
+        self.logger = TelemetryLogger(cfg.LOG_DIR)
 
     def _on_telemetry(self, d: dict):
         self.last_rx = time.time()
         if self.currentWidget() is self.telemetry_screen:
             self.telemetry_screen.update_data(d)
+            self.logger.write(d)
 
     def _quit(self):
-        """Stop au Teensy, fermeture du lien, sortie de l'application."""
+        """Stop au Teensy, fermeture du lien, sortie de
+        l'application."""
+        self.logger.stop()
         self.link.send(cfg.STOP_PAYLOAD)
+        
         self.link.stop_link()
         QApplication.quit()
 
     def _on_start(self, payload: dict):
         self.link.send(payload)
         self.setCurrentWidget(self.telemetry_screen)
+        self.logger.start(
 
     def _on_stop(self):
         self.link.send(cfg.STOP_PAYLOAD)

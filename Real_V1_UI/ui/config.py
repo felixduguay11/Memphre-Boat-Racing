@@ -16,6 +16,7 @@ from typing import Callable, List
 # puis remplacer par p.ex.
 #     SERIAL_PORT = "/dev/serial/by-id/usb-Teensyduino_USB_Serial_XXXXXXX-if00"
 SERIAL_PORT = "/dev/ttyACM0"
+LOG_DIR = "~/memphre_logs"
 
 # Ancien lien UART (pins 7/8), garde pour memoire :
 # SERIAL_PORT = "/dev/serial0"
