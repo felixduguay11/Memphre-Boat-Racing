@@ -55,7 +55,7 @@ class MainWindow(QStackedWidget):
     def _on_start(self, payload: dict):
         self.link.send(payload)
         self.setCurrentWidget(self.telemetry_screen)
-        self.logger.start(
+        self.logger.start()
 
     def _on_stop(self):
         self.link.send(cfg.STOP_PAYLOAD)
