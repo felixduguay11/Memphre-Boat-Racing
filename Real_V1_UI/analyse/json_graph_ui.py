@@ -14,6 +14,7 @@ sont éclatées par id (ex. "esc": [{"id": 10, "erpm": ...}] -> "esc10.erpm").
 """
 
 import json
+import signal
 import sys
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -26,6 +27,54 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 
 INDEX_LABEL = "(index / numéro de ligne)"
 CHART_TYPES = ["Ligne", "Barres", "Nuage de points", "Aire", "Histogramme"]
+
+# --------------------------------------------------------------------------- #
+#  Grandeurs et unités, selon le nom du champ (sans le préfixe "esc10.")
+#  Ajoutez ici vos propres champs : "nom": ("Libellé", "Grandeur", "unité")
+#  La "Grandeur" sert à regrouper l'axe Y (ex. i_in et i_mot = Courant).
+# --------------------------------------------------------------------------- #
+UNITS = {
+    "erpm":   ("Vitesse électrique", "Vitesse",     "ERPM"),
+    "target": ("Consigne",           "Vitesse",     "ERPM"),
+    "ramped": ("Consigne rampée",    "Vitesse",     "ERPM"),
+    "i_in":   ("Courant d'entrée",   "Courant",     "A"),
+    "i_mot":  ("Courant moteur",     "Courant",     "A"),
+    "v_in":   ("Tension d'entrée",   "Tension",     "V"),
+    "duty":   ("Rapport cyclique",   "Rapport cyclique", "0–1"),
+    "t_fet":  ("Température FET",    "Température", "°C"),
+    "t_mot":  ("Température moteur", "Température", "°C"),
+    "t":      ("Temps",              "Temps",       "s"),
+    "t_pi":   ("Temps Pi",           "Temps",       "s"),
+    "ok":     ("Statut ESC",         "Statut",      ""),
+}
+
+
+# Conversions appliquées au chargement : "champ": facteur multiplicatif
+# (t est enregistré en ms dans le log -> converti en secondes)
+CONVERSIONS = {
+    "t": 0.001,
+}
+
+
+def describe_column(col: str):
+    """'esc10.i_mot' -> ('Courant moteur (ESC 10)', 'Courant', 'A')"""
+    prefix, _, base = col.rpartition(".")
+    label, quantity, unit = UNITS.get(base, (base, base, ""))
+    if prefix:
+        source = prefix.upper().replace("ESC", "ESC ") if prefix.startswith("esc") else prefix
+        label = f"{label} ({source})"
+    return label, quantity, unit
+
+
+def axis_label(cols):
+    """Libellé d'axe : 'Courant (A)' si tout est de même grandeur."""
+    infos = [describe_column(c) for c in cols]
+    groups = []
+    for _, quantity, unit in infos:
+        text = f"{quantity} ({unit})" if unit else quantity
+        if text not in groups:
+            groups.append(text)
+    return " / ".join(groups)
 
 
 # --------------------------------------------------------------------------- #
@@ -105,6 +154,11 @@ def load_json_to_dataframe(path: str) -> pd.DataFrame:
                     df[col] = dates
             except (TypeError, ValueError):
                 pass
+    # Conversions d'unités (ex. ms -> s)
+    for col in df.columns:
+        factor = CONVERSIONS.get(col.rpartition(".")[2])
+        if factor is not None and pd.api.types.is_numeric_dtype(df[col]):
+            df[col] = df[col] * factor
     return df
 
 
@@ -116,10 +170,17 @@ class JsonGraphApp(tk.Tk):
         super().__init__()
         self.title("Graphiques JSON")
         self.geometry("1150x700")
-        self.minsize(900, 550)
+        self.minsize(1480, 920)
 
         self.df: pd.DataFrame | None = None
         self._build_ui()
+
+        # Fermeture propre : bouton X, Ctrl+Q, Échap et Ctrl+C dans le terminal
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.bind("<Control-q>", lambda e: self.on_close())
+        self.bind("<Escape>", lambda e: self.on_close())
+        signal.signal(signal.SIGINT, lambda *a: self.on_close())
+        self._keep_python_awake()
 
         if initial_file:
             self.open_file(initial_file)
@@ -209,6 +270,21 @@ class JsonGraphApp(tk.Tk):
         self._placeholder("Ouvrez un fichier JSON pour commencer")
 
         self._toggle_rows()
+
+    # ---------- fermeture ----------
+    def _keep_python_awake(self):
+        # Tk bloque les signaux ; ce petit réveil régulier laisse passer Ctrl+C
+        self._awake_id = self.after(200, self._keep_python_awake)
+
+    def on_close(self):
+        try:
+            self.after_cancel(self._awake_id)
+        except Exception:
+            pass
+        import matplotlib.pyplot as plt
+        plt.close("all")
+        self.quit()      # arrête mainloop
+        self.destroy()   # détruit la fenêtre
 
     # ---------- helpers ----------
     def _placeholder(self, text):
@@ -305,12 +381,14 @@ class JsonGraphApp(tk.Tk):
         data = self._subset().copy()
         if x_col == INDEX_LABEL:
             x = pd.Series(range(len(data)), index=data.index)
-            x_name = "Index"
+            x_name = "Numéro de mesure"
         else:
             if self.sort_x.get() and kind != "Histogramme":
                 data = data.sort_values(x_col)
             x = data[x_col]
-            x_name = x_col
+            x_name = axis_label([x_col])
+
+        names = {c: describe_column(c)[0] for c in y_cols}
 
         self.ax.clear()
         self.ax.set_axis_on()
@@ -318,15 +396,15 @@ class JsonGraphApp(tk.Tk):
         try:
             if kind == "Histogramme":
                 for col in y_cols:
-                    self.ax.hist(data[col].dropna(), bins="auto", alpha=0.6, label=col)
-                self.ax.set_xlabel(", ".join(y_cols))
+                    self.ax.hist(data[col].dropna(), bins="auto", alpha=0.6, label=names[col])
+                self.ax.set_xlabel(axis_label(y_cols))
                 self.ax.set_ylabel("Fréquence")
             elif kind == "Barres":
                 width = 0.8 / len(y_cols)
                 positions = range(len(data))
                 for i, col in enumerate(y_cols):
                     self.ax.bar([p + i * width for p in positions], data[col],
-                                width=width, label=col)
+                                width=width, label=names[col])
                 step = max(1, len(data) // 20)   # évite les étiquettes illisibles
                 ticks = list(positions)[::step]
                 self.ax.set_xticks([t + width * (len(y_cols) - 1) / 2 for t in ticks])
@@ -337,22 +415,27 @@ class JsonGraphApp(tk.Tk):
                 for col in y_cols:
                     if kind == "Ligne":
                         self.ax.plot(x, data[col], marker="o" if len(data) <= 50 else None,
-                                     label=col)
+                                     label=names[col])
                     elif kind == "Nuage de points":
-                        self.ax.scatter(x, data[col], s=18, label=col)
+                        self.ax.scatter(x, data[col], s=18, label=names[col])
                     elif kind == "Aire":
-                        self.ax.fill_between(x, data[col], alpha=0.4, label=col)
+                        self.ax.fill_between(x, data[col], alpha=0.4, label=names[col])
                         self.ax.plot(x, data[col])
                 self.ax.set_xlabel(x_name)
                 if not pd.api.types.is_numeric_dtype(x):
                     self.fig.autofmt_xdate()
 
             if kind != "Histogramme":
-                self.ax.set_ylabel(y_cols[0] if len(y_cols) == 1 else "Valeur")
-            if len(y_cols) > 1 or kind == "Histogramme":
+                self.ax.set_ylabel(axis_label(y_cols))
+            if len(y_cols) > 1:
                 self.ax.legend()
             self.ax.grid(self.grid_on.get(), alpha=0.3)
-            self.ax.set_title(f"{kind} — {len(data)} ligne(s)")
+            title = ", ".join(names[c] for c in y_cols)
+            if kind == "Histogramme":
+                title = f"Distribution : {title}"
+            elif x_col != INDEX_LABEL:
+                title = f"{title} selon {describe_column(x_col)[0].lower()}"
+            self.ax.set_title(title, wrap=True)
             self.fig.tight_layout()
         except Exception as e:
             self._placeholder("Impossible de tracer ces colonnes")
@@ -370,4 +453,6 @@ class JsonGraphApp(tk.Tk):
 
 
 if __name__ == "__main__":
-    JsonGraphApp(sys.argv[1] if len(sys.argv) > 1 else None).mainloop()
+    app = JsonGraphApp(sys.argv[1] if len(sys.argv) > 1 else None)
+    app.mainloop()
+    sys.exit(0)
