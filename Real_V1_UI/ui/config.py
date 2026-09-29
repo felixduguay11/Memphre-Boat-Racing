@@ -18,11 +18,19 @@ from typing import Callable, List
 SERIAL_PORT = "/dev/ttyACM0"
 LOG_DIR = "~/memphre_logs"
 
+# Mise a jour du Teensy depuis l'ecran (bouton sur l'accueil).
+# FW_DIR = dossier qui contient platformio.ini.
+# PIO_BIN vide = cherche pio dans le PATH puis dans ~/.platformio.
+FW_DIR = "~/Memphre-Boat-Racing/Real_V1"
+PIO_BIN = ""
+# git pull --ff-only avant de compiler. Mettre False sans internet (sur
+# l'eau) pour flasher le code deja present sur le Pi.
+GIT_PULL = True
+
 # Ancien lien UART (pins 7/8), garde pour memoire :
 # SERIAL_PORT = "/dev/serial0"
 
 BAUD = 115200               # ignore en USB CDC, sans effet
-LINK_TIMEOUT_S = 1.0        # sans trame depuis X s -> lien considere perdu
 SCREEN_W, SCREEN_H = 800, 480
 
 # ------------------------------------------------------------ moteurs
@@ -88,9 +96,42 @@ def esc_unit() -> str:
     return "RPM" if POLE_PAIRS else "eRPM"
 
 
-def esc_sub(e: dict) -> str:
-    return "%s  ·  %.1f A  ·  FET %.0f °C  ·  mot %.0f °C" % (
-        esc_unit(), e.get("i_mot", 0.0), e.get("t_fet", 0.0), e.get("t_mot", 0.0))
+# ------------------------------------------------------------ alarmes temperature
+# Le pilote ne lit pas de chiffres : chaque temperature affiche OK, ou
+# NOT OK (xx °C) des qu'elle atteint sa limite.
+# A ajuster selon VESC Tool : par defaut le VESC commence lui-meme a
+# limiter le courant vers 85 °C, l'alerte doit donc tomber avant.
+T_FET_MAX = 75.0            # °C
+T_MOT_MAX = 75.0            # °C
+
+# Hysteresis : une fois en alerte, il faut redescendre de X °C sous la
+# limite pour revenir a OK. Evite que l'affichage clignote quand la
+# temperature oscille autour du seuil.
+TEMP_HYST = 3.0             # °C
+
+
+@dataclass(frozen=True)
+class TempCheck:
+    label: str              # texte affiche
+    key: str                # cle dans la trame ESC
+    limit: float            # °C
+
+
+ESC_TEMPS: List[TempCheck] = [
+    TempCheck("TEMP FET", "t_fet", T_FET_MAX),
+    TempCheck("TEMP MOT", "t_mot", T_MOT_MAX),
+]
+
+
+def temp_ok(t: float, limit: float, was_ok: bool = True) -> bool:
+    """Seuil a la montee, seuil moins l'hysteresis a la descente."""
+    return t < limit if was_ok else t < limit - TEMP_HYST
+
+
+def temp_text(label: str, t: float, ok: bool) -> str:
+    if ok:
+        return "%s : OK" % label
+    return "%s : NOT OK (%.0f °C)" % (label, t)
 
 
 def esc_offline_sub(_e: dict) -> str:
