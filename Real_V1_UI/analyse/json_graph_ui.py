@@ -429,7 +429,10 @@ class JsonGraphApp(tk.Tk):
                 self.ax.set_ylabel(axis_label(y_cols))
             if len(y_cols) > 1:
                 self.ax.legend()
-            self.ax.grid(self.grid_on.get(), alpha=0.3)
+            if self.grid_on.get():
+                self.ax.grid(True, alpha=0.3)
+            else:
+                self.ax.grid(False)
             title = ", ".join(names[c] for c in y_cols)
             if kind == "Histogramme":
                 title = f"Distribution : {title}"
