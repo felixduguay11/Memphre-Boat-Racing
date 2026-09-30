@@ -1,6 +1,6 @@
 // =====================================================
 //  task_esc_data.cpp
-//  Tâche FreeRTOS — données VESC (CAN3), 1 kHz.
+//  Tâche FreeRTOS — données VESC (CAN3), 200 Hz.
 //  Bus, IDs et décodage repris tels quels de Real_V1.
 // =====================================================
 
@@ -32,13 +32,22 @@ void ESC_InitCAN()
     rawCan1.begin();
     rawCan1.setBaudRate(BAUD_CAN);
 
-    // Configuration des mailboxes : défaut de FlexCAN_T4, IDENTIQUE à
-    // Real_V1 (0-3 RX std, 4-7 RX étendues, 8-15 TX). Ne PAS appeler
-    // setMaxMB() ici : il réinitialise la disposition AVANT de changer le
-    // nombre de mailboxes, les nouvelles restent non initialisées (plus
-    // aucune mailbox TX valide, trames parasites possibles).
-    // Les 4 mailboxes RX étendues suffisent car la tâche vide le bus
-    // toutes les PERIODE_ESC_MS = 1 ms (bus 250 kbps : ~2 trames/ms max).
+    // Mailboxes : 32 au total, 0-15 en RX étendues (trames des VESC),
+    // 16-31 en TX. C'est la disposition qui recevait bien au lac ; la
+    // disposition par défaut de FlexCAN_T4 (4 RX étendues, 4-7) ne
+    // reçoit rien sur ce montage.
+    //  1) setMaxMB(32)     : passe à 32 mailboxes. ATTENTION : il
+    //                        réinitialise AVANT de changer le nombre, les
+    //                        mailboxes 16-31 restent non initialisées...
+    //  2) enableFIFO(false): ...donc on relance la disposition par défaut
+    //                        sur les 32 : tout est effacé, 0-15 RX
+    //                        (0-7 std, 8-15 étendues), 16-31 TX valides.
+    //  3) setMB(0..7)      : 0-7 passent aussi en RX étendues.
+    rawCan1.setMaxMB(32);
+    rawCan1.enableFIFO(false);
+    for (int i = 0; i < 8; i++) {
+        rawCan1.setMB((FLEXCAN_MAILBOX)i, RX, EXT);
+    }
 
     vesc.begin();
 }
@@ -61,7 +70,7 @@ static bool vescVivant(uint8_t id)
 }
 
 // =====================================================
-//  Task_ESC_Data — 1 kHz
+//  Task_ESC_Data — 200 Hz
 // =====================================================
 void Task_ESC_Data(void *ptr)
 {
