@@ -232,7 +232,7 @@
 #define T_FET_MAX           75.0f    // °C
 #define T_MOT_MAX           75.0f    // °C
 #define TEMP_HYST           3.0f     // °C
-#define ERPM_MAX_SURCHAUFFE 3000     // plafond de consigne en surchauffe
+#define ERPM_MAX_SURCHAUFFE 18000     // plafond de consigne en surchauffe
 //------------------------------------//
 
 
