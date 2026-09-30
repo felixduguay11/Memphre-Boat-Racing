@@ -154,6 +154,85 @@ def mode_text(d: dict) -> str:
     return "%s · %s" % (d.get("mode", "?"), d.get("run", "?"))
 
 
+# Modes affiches en rouge dans la pastille d'etat (ARRET = erreur
+# critique detectee par le watchdog du Teensy : moteurs coupes).
+MODES_ALERTE = {"ARRET"}
+
+
+def mode_ok(d: dict) -> bool:
+    return d.get("mode") not in MODES_ALERTE
+
+
 def target_text(d: dict) -> str:
     """Consigne moteur — affichee dans la barre du haut, pas dans les cartes."""
     return "consigne %d eRPM" % int(d.get("target", 0))
+
+
+# ------------------------------------------------------------ page Xsens
+# Cles de la trame du firmware "Integration taille reel" :
+#   "imu": {"ok", "frais", "roll", "pitch", "yaw", "vok", "v_kmh"}
+#   "gps": {"ok", "lat", "lon", "alt_ok", "alt"}
+# Une valeur absente, invalide ou perimee s'affiche "--" : on n'affiche
+# jamais au pilote une vitesse ou un angle qui ne sont plus a jour.
+SPEED_LABEL = "Vitesse GPS"
+SPEED_UNIT = "km/h"
+
+
+def _imu(d: dict) -> dict:
+    return d.get("imu") or {}
+
+
+def _gps(d: dict) -> dict:
+    return d.get("gps") or {}
+
+
+def _imu_fresh(d: dict) -> bool:
+    i = _imu(d)
+    return bool(i.get("ok")) and bool(i.get("frais", 1))
+
+
+def speed_text(d: dict) -> str:
+    i = _imu(d)
+    if i.get("vok") and i.get("frais", 1) and "v_kmh" in i:
+        return "%.1f" % i["v_kmh"]
+    return "--"
+
+
+def _angle(d: dict, key: str, fmt: str) -> str:
+    return fmt % _imu(d)[key] if _imu_fresh(d) else "--"
+
+
+# Une ligne par angle affiche a droite de la vitesse.
+IMU_METRICS: List[Metric] = [
+    Metric("Roulis",  lambda d: _angle(d, "roll",  "%+.1f"), "°"),
+    Metric("Tangage", lambda d: _angle(d, "pitch", "%+.1f"), "°"),
+    Metric("Lacet",   lambda d: _angle(d, "yaw",   "%.0f"),  "°"),
+]
+
+
+def imu_status(d: dict):
+    """(texte, ok) ; ok = None si l'information est absente."""
+    if "imu" not in d:
+        return "IMU : absent de la trame", None
+    i = _imu(d)
+    if not i.get("ok"):
+        return "IMU : pas de donnees", False
+    if not i.get("frais", 1):
+        return "IMU : donnees perimees", False
+    return "IMU : OK", True
+
+
+def gps_status(d: dict):
+    if "gps" not in d:
+        return "GPS : absent de la trame", None
+    return ("GPS : OK", True) if _gps(d).get("ok") else ("GPS : pas de position", False)
+
+
+def position_text(d: dict) -> str:
+    g = _gps(d)
+    return "%.6f, %.6f" % (g["lat"], g["lon"]) if g.get("ok") else "--"
+
+
+def altitude_text(d: dict) -> str:
+    g = _gps(d)
+    return "%.1f m" % g["alt"] if g.get("alt_ok") else "--"
