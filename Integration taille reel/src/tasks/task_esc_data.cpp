@@ -1,6 +1,6 @@
 // =====================================================
 //  task_esc_data.cpp
-//  Tâche FreeRTOS — données VESC (CAN3), 200 Hz.
+//  Tâche FreeRTOS — données VESC (CAN3), 1 kHz.
 //  Bus, IDs et décodage repris tels quels de Real_V1.
 // =====================================================
 
@@ -32,15 +32,13 @@ void ESC_InitCAN()
     rawCan1.begin();
     rawCan1.setBaudRate(BAUD_CAN);
 
-    // Par défaut FlexCAN n'a que 4 mailboxes RX pour les trames
-    // étendues (celles des VESC). Real_V1 vidait le bus en continu ;
-    // ici la tâche passe toutes les 5 ms → 32 mailboxes : 0-15 RX
-    // étendues, 16-31 TX. À 250 kbps le bus porte ~1,9 trame/ms au
-    // max : 16 mailboxes = ~8 ms de marge avant perte.
-    rawCan1.setMaxMB(32);
-    for (int i = 0; i < 16; i++) {
-        rawCan1.setMB((FLEXCAN_MAILBOX)i, RX, EXT);
-    }
+    // Configuration des mailboxes : défaut de FlexCAN_T4, IDENTIQUE à
+    // Real_V1 (0-3 RX std, 4-7 RX étendues, 8-15 TX). Ne PAS appeler
+    // setMaxMB() ici : il réinitialise la disposition AVANT de changer le
+    // nombre de mailboxes, les nouvelles restent non initialisées (plus
+    // aucune mailbox TX valide, trames parasites possibles).
+    // Les 4 mailboxes RX étendues suffisent car la tâche vide le bus
+    // toutes les PERIODE_ESC_MS = 1 ms (bus 250 kbps : ~2 trames/ms max).
 
     vesc.begin();
 }
@@ -63,7 +61,7 @@ static bool vescVivant(uint8_t id)
 }
 
 // =====================================================
-//  Task_ESC_Data — 200 Hz
+//  Task_ESC_Data — 1 kHz
 // =====================================================
 void Task_ESC_Data(void *ptr)
 {
