@@ -19,10 +19,22 @@ SERIAL_PORT = "/dev/ttyACM0"
 LOG_DIR = "~/memphre_logs"
 
 # Mise a jour du Teensy depuis l'ecran (bouton sur l'accueil).
-# FW_DIR = dossier qui contient platformio.ini.
+#
+# FLASH_MODE = "hex" : Integration taille reel (FreeRTOS, plateforme
+#   tsandmann). Le Pi ne peut PAS compiler ce firmware (toolchain
+#   tsandmann absente pour ARM) : on flashe FW_HEX, compile sur PC et
+#   committe (copie auto par scripts/copie_hex.py).
+#   Prerequis Pi : teensy_loader_cli + regles udev PJRC (00-teensy.rules).
+# FLASH_MODE = "pio" : ancien mode, compile sur le Pi (Real_V1).
+FLASH_MODE = "hex"
+
+# FW_DIR = dossier du firmware (git pull y est lance ; platformio.ini en mode pio).
 # PIO_BIN vide = cherche pio dans le PATH puis dans ~/.platformio.
-FW_DIR = "~/Memphre-Boat-Racing/Real_V1"
+FW_DIR = "~/Memphre-Boat-Racing/Integration taille reel"
 PIO_BIN = ""
+FW_HEX = FW_DIR + "/firmware/firmware.hex"
+# TEENSY_CLI vide = PATH (apt), puis ~/teensy_loader_cli/teensy_loader_cli
+TEENSY_CLI = ""
 # git pull --ff-only avant de compiler. Mettre False sans internet (sur
 # l'eau) pour flasher le code deja present sur le Pi.
 GIT_PULL = True
@@ -39,7 +51,7 @@ ESC_IDS = [10, 11]
 # Nombre de PAIRES de poles du moteur (pas le nombre de poles !).
 # Sert a convertir l'eRPM du VESC en RPM mecanique : RPM = eRPM / paires.
 # Mettre None si le nombre n'est pas connu -> affichage en eRPM brut.
-POLE_PAIRS = 6
+POLE_PAIRS = 4
 
 
 # ------------------------------------------------------------ commandes
