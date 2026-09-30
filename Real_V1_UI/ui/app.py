@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication, QStackedWidget
 from . import config as cfg
 from . import theme
 from .link import make_link
-from .screens import StartScreen, TelemetryScreen, FlashScreen
+from .screens import StartScreen, TelemetryScreen, XsensScreen, FlashScreen
 from .flasher import TeensyFlasher
 from .logger import TelemetryLogger
 
@@ -23,10 +23,16 @@ class MainWindow(QStackedWidget):
 
         self.start_screen = StartScreen()
         self.telemetry_screen = TelemetryScreen()
+        self.xsens_screen = XsensScreen()
         self.flash_screen = FlashScreen()
         self.addWidget(self.start_screen)
         self.addWidget(self.telemetry_screen)
+        self.addWidget(self.xsens_screen)
         self.addWidget(self.flash_screen)
+
+        # Pages de telemetrie (onglets), toutes alimentees par la trame
+        self._pages = {"moteurs": self.telemetry_screen, "xsens": self.xsens_screen}
+        self._streaming = False
 
         self._link_released = False
         self.flasher = TeensyFlasher(
@@ -45,7 +51,9 @@ class MainWindow(QStackedWidget):
         self.flash_screen.run_requested.connect(self._start_flash)
         self.flash_screen.back_requested.connect(
             lambda: self.setCurrentWidget(self.start_screen))
-        self.telemetry_screen.stopped.connect(self._on_stop)
+        for page in self._pages.values():
+            page.stopped.connect(self._on_stop)
+            page.page_requested.connect(self._show_page)
         self.link.telemetry.connect(self._on_telemetry)
 
         self.setFixedSize(cfg.SCREEN_W, cfg.SCREEN_H)
@@ -65,9 +73,15 @@ class MainWindow(QStackedWidget):
         theme.save_theme(name)
 
     def _on_telemetry(self, d: dict):
-        if self.currentWidget() is self.telemetry_screen:
-            self.telemetry_screen.update_data(d)
+        # Toutes les pages sont a jour : changer d'onglet n'affiche
+        # jamais une valeur perimee. Le log tourne quel que soit l'onglet.
+        if self._streaming:
+            for page in self._pages.values():
+                page.update_data(d)
             self.logger.write(d)
+
+    def _show_page(self, key: str):
+        self.setCurrentWidget(self._pages[key])
 
     def _quit(self):
         """Stop au Teensy, fermeture du log, sortie de l'application.
@@ -78,11 +92,13 @@ class MainWindow(QStackedWidget):
 
     def _on_start(self, payload: dict):
         self.link.send(payload)
+        self._streaming = True
         self.setCurrentWidget(self.telemetry_screen)
         self.logger.start()
 
     def _on_stop(self):
         self.link.send(cfg.STOP_PAYLOAD)
+        self._streaming = False
         self.logger.stop()
         self.setCurrentWidget(self.start_screen)
 

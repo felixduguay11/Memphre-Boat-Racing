@@ -3,12 +3,12 @@
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QPlainTextEdit
+    QWidget, QFrame, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QPlainTextEdit, QSizePolicy
 )
 
 from . import config as cfg
-from .widgets import Card, Badge, EscCard
+from .widgets import Card, RowCard, Badge, EscCard, set_status_style
 
 CENTER = Qt.AlignmentFlag.AlignCenter
 
@@ -16,9 +16,48 @@ CENTER = Qt.AlignmentFlag.AlignCenter
 def _close_button(slot) -> QPushButton:
     b = QPushButton("Close")
     b.setObjectName("ghost")
-    b.setFixedSize(110, 44)
+    b.setFixedSize(130, 52)
     b.clicked.connect(slot)
     return b
+
+
+# Pages de telemetrie, dans l'ordre des onglets
+PAGES = [("moteurs", "Moteurs"), ("xsens", "Xsens")]
+
+
+class _PageBar(QHBoxLayout):
+    """Barre commune aux pages de telemetrie : onglets a gauche,
+    consigne et etat (mode · run) a droite."""
+
+    def __init__(self, active: str, on_page):
+        super().__init__()
+        self.setSpacing(8)
+        for key, text in PAGES:
+            b = QPushButton(text)
+            b.setObjectName("tabOn" if key == active else "tab")
+            b.setFixedSize(122, 50)
+            b.clicked.connect(lambda _=False, k=key: on_page(k))
+            self.addWidget(b)
+        self.target = QLabel("--")
+        self.target.setObjectName("barHint")
+        # Si la place manque, c'est la consigne qui est rognee, jamais l'etat
+        self.target.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.target.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.mode = Badge("--", True)
+        self.addWidget(self.target, 1)
+        self.addSpacing(10)
+        self.addWidget(self.mode)
+
+    def update_data(self, d: dict):
+        self.mode.set_state(cfg.mode_text(d), cfg.mode_ok(d))
+        self.target.setText(cfg.target_text(d))
+
+
+def _stop_button(slot) -> QPushButton:
+    stop = QPushButton("Stop")
+    stop.setObjectName("danger")
+    stop.clicked.connect(slot)
+    return stop
 
 
 class StartScreen(QWidget):
@@ -39,12 +78,12 @@ class StartScreen(QWidget):
         bar = QHBoxLayout()
         self.theme_btn = QPushButton()
         self.theme_btn.setObjectName("ghost")
-        self.theme_btn.setFixedSize(170, 44)
+        self.theme_btn.setFixedSize(200, 52)
         self.theme_btn.clicked.connect(self.theme_toggled.emit)
         bar.addWidget(self.theme_btn)
         flash = QPushButton("Mise a jour Teensy")
         flash.setObjectName("ghost")
-        flash.setFixedSize(210, 44)
+        flash.setFixedSize(250, 52)
         flash.clicked.connect(self.flash_requested.emit)
         bar.addWidget(flash)
         bar.addStretch()
@@ -90,7 +129,7 @@ class FlashScreen(QWidget):
         bar.addStretch()
         self._back = QPushButton("Retour")
         self._back.setObjectName("ghost")
-        self._back.setFixedSize(110, 44)
+        self._back.setFixedSize(130, 52)
         self._back.clicked.connect(self.back_requested.emit)
         bar.addWidget(self._back)
         root.addLayout(bar)
@@ -143,8 +182,10 @@ class FlashScreen(QWidget):
 
 
 class TelemetryScreen(QWidget):
-    """Affiche une trame de telemetrie ; cartes generees depuis cfg."""
+    """Page Moteurs : batterie / courant / puissance et une carte par ESC.
+    Cartes generees depuis cfg."""
     stopped = Signal()
+    page_requested = Signal(str)
 
     def __init__(self, metrics=None, esc_ids=None, columns: int = None):
         super().__init__()
@@ -153,49 +194,39 @@ class TelemetryScreen(QWidget):
         columns = columns or cfg.TOP_COLUMNS
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(22, 18, 22, 18)
-        root.setSpacing(10)
+        root.setContentsMargins(16, 12, 16, 12)
+        root.setSpacing(8)
 
-        bar = QHBoxLayout()
-        titre = QLabel("Telemetrie")
-        titre.setObjectName("title")
-        self.target = QLabel("--")
-        self.target.setObjectName("hint")
-        self.mode = Badge("--", True)
-        bar.addWidget(titre)
-        bar.addStretch()
-        bar.addWidget(self.target)
-        bar.addSpacing(14)
-        bar.addWidget(self.mode)
-        root.addLayout(bar)
+        self._bar = _PageBar("moteurs", self.page_requested.emit)
+        root.addLayout(self._bar)
 
         top = QGridLayout()
-        top.setSpacing(10)
+        top.setSpacing(8)
         self._metrics = []
         for n, m in enumerate(metrics):
             c = Card(m.label, m.unit)
             top.addWidget(c, n // columns, n % columns)
             self._metrics.append((m, c))
+        for k in range(columns):
+            top.setColumnStretch(k, 1)              # colonnes de largeur egale
         root.addLayout(top)
 
         grid = QGridLayout()
-        grid.setSpacing(10)
+        grid.setSpacing(8)
         self._esc_cards = {}
         self._temp_ok = {}      # (id ESC, cle) -> etat precedent, pour l'hysteresis
         for n, i in enumerate(esc_ids):
             c = EscCard("ESC %d" % i, cfg.esc_unit(), len(cfg.ESC_TEMPS))
             grid.addWidget(c, n // 2, n % 2)
             self._esc_cards[i] = c
+        for k in range(2):
+            grid.setColumnStretch(k, 1)
         root.addLayout(grid, 1)     # les cartes ESC prennent la hauteur libre
 
-        stop = QPushButton("Stop")
-        stop.setObjectName("danger")
-        stop.clicked.connect(self.stopped.emit)
-        root.addWidget(stop)
+        root.addWidget(_stop_button(self.stopped.emit))
 
     def update_data(self, d: dict):
-        self.mode.set_state(cfg.mode_text(d), True)
-        self.target.setText(cfg.target_text(d))
+        self._bar.update_data(d)
 
         for m, card in self._metrics:
             try:
@@ -237,3 +268,79 @@ class TelemetryScreen(QWidget):
         card.clear_status()
         for chk in cfg.ESC_TEMPS:
             self._temp_ok.pop((esc_id, chk.key), None)
+
+
+class XsensScreen(QWidget):
+    """Page Xsens : vitesse GPS en tres gros, angles, etat IMU / GPS."""
+    stopped = Signal()
+    page_requested = Signal(str)
+
+    def __init__(self, metrics=None):
+        super().__init__()
+        metrics = metrics or cfg.IMU_METRICS
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 12, 16, 12)
+        root.setSpacing(8)
+
+        self._bar = _PageBar("xsens", self.page_requested.emit)
+        root.addLayout(self._bar)
+
+        # Vitesse (gauche, large) + angles (droite, une ligne chacun)
+        main = QHBoxLayout()
+        main.setSpacing(8)
+        self._speed = Card(cfg.SPEED_LABEL, cfg.SPEED_UNIT, "speedValue",
+                           center=True, unit_name="speedUnit")
+        main.addWidget(self._speed, 1)
+
+        # Colonne des angles a largeur fixe : la mise en page ne bouge
+        # pas quand les valeurs changent de longueur.
+        colw = QWidget()
+        colw.setFixedWidth(280)
+        col = QVBoxLayout(colw)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(8)
+        self._metrics = []
+        for m in metrics:
+            c = RowCard(m.label, m.unit)
+            col.addWidget(c, 1)
+            self._metrics.append((m, c))
+        main.addWidget(colw)
+        root.addLayout(main, 1)
+
+        # Ligne du bas : etats IMU / GPS, position, altitude
+        info = QFrame()
+        info.setObjectName("card")
+        lay = QHBoxLayout(info)
+        lay.setContentsMargins(12, 6, 12, 6)
+        lay.setSpacing(12)
+        self._imu_state = QLabel("--")
+        self._gps_state = QLabel("--")
+        for w in (self._imu_state, self._gps_state):
+            set_status_style(w, None)
+            lay.addWidget(w)
+        lay.addStretch()
+        self._pos = QLabel("--");  self._pos.setObjectName("smallValue")
+        self._alt = QLabel("--");  self._alt.setObjectName("smallValue")
+        lay.addWidget(self._pos)
+        lay.addSpacing(10)
+        lay.addWidget(self._alt)
+        root.addWidget(info)
+
+        root.addWidget(_stop_button(self.stopped.emit))
+
+    def update_data(self, d: dict):
+        self._bar.update_data(d)
+        self._speed.set_value(cfg.speed_text(d))
+        for m, card in self._metrics:
+            try:
+                card.set_value(m.value(d))
+            except Exception:
+                card.set_value("--")
+        for w, (text, ok) in ((self._imu_state, cfg.imu_status(d)),
+                              (self._gps_state, cfg.gps_status(d))):
+            w.setText(text)
+            set_status_style(w, ok)
+        self._pos.setText(cfg.position_text(d))
+        self._alt.setText(cfg.altitude_text(d))
+

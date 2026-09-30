@@ -161,9 +161,17 @@ class SimLink(BaseLink):
                 "i_mot": iin / len(self._ids) + 1, "i_in": iin / len(self._ids),
                 "v_in": vin, "t_fet": 42 + n / 400.0, "t_mot": 38 + n / 500.0,
             })
+        # Xsens (format du firmware Integration taille reel)
+        v = 11.0 + math.sin(n / 60.0) * 9.0                     # 2..20 km/h
+        imu = {"ok": 1, "frais": 1, "roll": math.sin(n / 18.0) * 6.0,
+               "pitch": 2.0 + math.sin(n / 30.0) * 1.5,
+               "yaw": (n * 0.5) % 360 - 180, "vok": 1, "v_kmh": v}
+        gps = {"ok": 1, "lat": 45.1200 + n * 1e-6, "lon": -72.2600 + n * 1e-6,
+               "alt_ok": 1, "alt": 208.0}
         self.telemetry.emit({"t": n * self._timer.interval(), "mode": "RUN",
                              "run": "FORWARD", "target": int(erpm),
-                             "ramped": int(erpm), "esc": escs})
+                             "ramped": int(erpm), "esc": escs,
+                             "imu": imu, "gps": gps})
 
 
 def make_link(port: str, baud: int, esc_ids, simulated: bool) -> BaseLink:
