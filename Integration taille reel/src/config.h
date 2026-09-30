@@ -26,7 +26,7 @@
 #define PERIODE_RPI_MS              50   // 20Hz — télémétrie JSON (Real_V1 : TLM_MS)
 #define PERIODE_PILOTE_MS           20   // 50Hz
 #define PERIODE_PROP_MS             20   // 50Hz — envoi consigne VESC (Real_V1 : 20 ms)
-#define PERIODE_ESC_MS              5    // 200Hz — vidage du buffer CAN
+#define PERIODE_ESC_MS              1    // 1kHz — vidage du bus CAN (4 mailboxes RX étendues, comme Real_V1)
 #define PERIODE_WD_MS               100  // 10Hz
 #define FSM_TIMEOUT_MS              100  // sans événement pendant ce délai → pilote considéré absent
 //------------------------------------//
@@ -200,7 +200,7 @@
 // ARMEMENT_REQUIS  1 = protection active (recommandé sur l'eau)
 //                  0 = désactivée, le levier répond tout de suite
 #define ARMEMENT_REQUIS     1
-#define LEVIER_RAW_ARME     300    // raw sous lequel le levier est « au neutre »
+#define LEVIER_RAW_ARME     330    // raw sous lequel le levier est « au neutre » (MIN + DEADBAND)
 //------------------------------------//
 
 
@@ -228,9 +228,9 @@
 // (T_FET_MAX, T_MOT_MAX, TEMP_HYST). Surchauffe → consigne
 // plafonnée à ERPM_MAX_SURCHAUFFE, retour quand toutes les temp.
 // sont sous (limite - TEMP_HYST).
-#define LIMITE_TEMP_ACTIVE  1        // 0 = surveillance désactivée
-#define T_FET_MAX           75.0f    // °C
-#define T_MOT_MAX           75.0f    // °C
+#define LIMITE_TEMP_ACTIVE  0        // 0 = surveillance désactivée
+#define T_FET_MAX           9999.0f    // °C
+#define T_MOT_MAX           9999.0f    // °C
 #define TEMP_HYST           3.0f     // °C
 #define ERPM_MAX_SURCHAUFFE 18000     // plafond de consigne en surchauffe
 //------------------------------------//
