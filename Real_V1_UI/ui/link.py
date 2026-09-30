@@ -63,11 +63,7 @@ class SerialLink(BaseLink):
         self._run = False
         self._thread.quit()
         self._thread.wait(1000)
-        if self._ser:
-            try:
-                self._ser.close()
-            except Exception:
-                pass
+        self._close()           # _ser = None : start_link() rouvrira le port
 
     def _loop(self):
         while self._run:
