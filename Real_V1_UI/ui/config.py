@@ -26,11 +26,11 @@ LOG_DIR = "~/memphre_logs"
 #   committe (copie auto par scripts/copie_hex.py).
 #   Prerequis Pi : teensy_loader_cli + regles udev PJRC (00-teensy.rules).
 # FLASH_MODE = "pio" : ancien mode, compile sur le Pi (Real_V1).
-FLASH_MODE = "hex"
+FLASH_MODE = "pio"
 
 # FW_DIR = dossier du firmware (git pull y est lance ; platformio.ini en mode pio).
 # PIO_BIN vide = cherche pio dans le PATH puis dans ~/.platformio.
-FW_DIR = "~/Memphre-Boat-Racing/Integration taille reel"
+FW_DIR = "~/Memphre-Boat-Racing/Real_V1"  # Integration taille reel
 PIO_BIN = ""
 FW_HEX = FW_DIR + "/firmware/firmware.hex"
 # TEENSY_CLI vide = PATH (apt), puis ~/teensy_loader_cli/teensy_loader_cli
