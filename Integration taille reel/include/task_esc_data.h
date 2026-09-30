@@ -3,7 +3,7 @@
 // =====================================================
 //  task_esc_data.h
 //  Tâche FreeRTOS : récupération des données des VESC
-//  (priorité 2, 1 kHz) sur CAN3 (pins 30/31, 250 kbps).
+//  (priorité 2, 200 Hz) sur CAN3 (pins 30/31, 250 kbps).
 //
 //  Le bus CAN (FlexCAN_T4 + VescCANBus de Real_V1) est privé
 //  à task_esc_data.cpp. Task_Propulsion envoie ses consignes
