@@ -190,8 +190,8 @@
 
 // Levier : bornes réelles MESURÉES de l'ADC (10 bits).
 // Relevé au banc : repos = 230, butée = 730.
-#define LEVIER_RAW_MIN      230    // valeur au repos (levier relâché)
-#define LEVIER_RAW_MAX      730    // valeur à fond
+#define LEVIER_RAW_MIN      300    // valeur au repos (levier relâché)
+#define LEVIER_RAW_MAX      700    // valeur à fond
 #define LEVIER_DEADBAND     30     // sous ce delta au-dessus du MIN -> 0
 
 // Armement : tant que le levier n'a pas été vu au neutre une fois
@@ -215,13 +215,13 @@
 // Hélices contrarotatives : les deux doivent tourner en sens
 // OPPOSÉS. Si le bateau recule quand le levier demande l'avant,
 // inverse les DEUX lignes. Jamais la même valeur.
-#define VESC_A_INVERSE      0
+#define VESC_A_INVERSE      1
 #define VESC_B_INVERSE      1
 
-#define RAMP_STEP           20       // changement max d'eRPM par cycle (20 ms)
+#define RAMP_STEP           80       // changement max d'eRPM par cycle (20 ms)
 #define ERPM_MIN_UTILE      1800
-#define ERPM_MAX_FORWARD    5500
-#define ERPM_MAX_REVERSE    3000     // magnitude ; le signe est mis dans le code
+#define ERPM_MAX_FORWARD    24000
+#define ERPM_MAX_REVERSE    4000     // magnitude ; le signe est mis dans le code
 #define PROP_CMD_TIMEOUT_MS 200      // commande FSM plus vieille → consigne 0
 
 // Limite de température — mêmes valeurs que config.py côté Pi
