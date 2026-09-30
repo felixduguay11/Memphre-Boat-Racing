@@ -1,6 +1,8 @@
 #include "task_foils_control.h"
 #include "task_sonar.h"
 #include "task_xsens.h"
+#include "rtos_com.h"        // egEtat : EVT_CONTROLE (machine d'état)
+#include "task_watchdog.h"
 
 extern SemaphoreHandle_t dataMutex;
 
@@ -124,7 +126,7 @@ void Task_foils_Control(void *ptr)
     {
         uint32_t t_debut = micros();
 
-        float dist[NB_CANAUX];
+        float dist[NB_CANAUX] = {};
         float pitch_deg = 0.0f;
         float roll_deg  = 0.0f;
         bool  xsens_ok  = false;
@@ -168,6 +170,22 @@ void Task_foils_Control(void *ptr)
         servo_raw[0] = (float)SERVO_NEUTRAL[0] + hauteur_out[0] + pitch_out;              // avant
         servo_raw[1] = (float)SERVO_NEUTRAL[1] + hauteur_out[1] - pitch_out - roll_out;   // arr. gauche
         servo_raw[2] = (float)SERVO_NEUTRAL[2] + hauteur_out[2] - pitch_out + roll_out;   // arr. droit
+
+        // AJOUT : PID appliqué uniquement en CONTROLE (machine d'état).
+        // Sinon : neutre + intégrateurs à zéro (pas de windup, réentrée
+        // propre sans pic de dérivée).
+        bool foils_actifs = (xEventGroupGetBits(egEtat) & EVT_CONTROLE) != 0;
+        if (!foils_actifs) {
+            for (int i = 0; i < NB_CANAUX; i++) {
+                servo_raw[i]   = (float)SERVO_NEUTRAL[i];
+                H_integral[i]  = 0.0f;
+                H_prev_dist[i] = dist[i];
+            }
+            P_integral   = 0.0f;
+            R_integral   = 0.0f;
+            P_prev_pitch = pitch_deg;
+            R_prev_roll  = roll_deg;
+        }
         
         for (int i = 0; i < NB_CANAUX; i++) {
             cmd_filt[i] = SERVO_ALPHA * servo_raw[i] + (1.0f - SERVO_ALPHA) * cmd_filt[i];
@@ -193,6 +211,7 @@ void Task_foils_Control(void *ptr)
             xSemaphoreGive(dataMutex);
         }
 
+        wd_vivant(T_FOILS);
         vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(PERIODE_height_control_MS));
     }
 }

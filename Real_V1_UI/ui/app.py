@@ -29,8 +29,11 @@ class MainWindow(QStackedWidget):
         self.addWidget(self.flash_screen)
 
         self._link_released = False
-        self.flasher = TeensyFlasher(cfg.FW_DIR, cfg.PIO_BIN, self._release_link,
-                                     cfg.GIT_PULL)
+        self.flasher = TeensyFlasher(
+            cfg.FW_DIR, cfg.PIO_BIN, self._release_link, cfg.GIT_PULL,
+            hex_path=cfg.FW_HEX if cfg.FLASH_MODE == "hex" else "",
+            serial_port=getattr(link, "_port", cfg.SERIAL_PORT),
+            teensy_cli=cfg.TEENSY_CLI)
         self.flasher.output.connect(self.flash_screen.append)
         self.flasher.state.connect(self.flash_screen.show_state)
         self.flasher.finished.connect(self._on_flash_done)

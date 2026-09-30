@@ -181,7 +181,7 @@
 //---------- ROLL CONTROLE ---------//
 #define R_REF_DEG             0.0f    // A changer par la consigne du volant !!!
 #define R_DEADBAND_ERR        2.0f
-#define R_DEADBAND_DERIV      0.3f
+#define R_DEADBAND_DERIV      0.3f    // 0.3/0.02 = 15deg/s
 #define R_INTEGRAL_MAX        20.0f
 #define R_INTEGRAL_MIN       -20.0f
 
