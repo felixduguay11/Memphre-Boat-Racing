@@ -64,14 +64,15 @@ QLabel#cardValue {{ font-size:56px; font-weight:600; }}
 QLabel#cardUnit  {{ font-size:24px; color:{muted}; }}
 QLabel#cardSub   {{ font-size:18px; color:{muted}; }}
 QFrame#card QLabel {{ background:transparent; }}
-QLabel#escValue  {{ font-size:88px; font-weight:600; }}
+QLabel#escValue  {{ font-size:72px; font-weight:600; }}
 QLabel#speedValue {{ font-size:150px; font-weight:600; }}
 QLabel#speedUnit  {{ font-size:32px; color:{muted}; }}
+QLabel#speedMid   {{ font-size:80px; font-weight:600; }}
 QLabel#rowValue   {{ font-size:50px; font-weight:600; }}
 QLabel#smallValue {{ font-size:24px; font-weight:500; }}
-QLabel#statusOk   {{ font-size:22px; color:{ok_fg}; padding:2px 10px; }}
-QLabel#statusNone {{ font-size:22px; color:{muted}; padding:2px 10px; }}
-QFrame#card QLabel#statusKo {{ font-size:22px; font-weight:600; color:{ko_fg};
+QLabel#statusOk   {{ font-size:19px; color:{ok_fg}; padding:2px 10px; }}
+QLabel#statusNone {{ font-size:19px; color:{muted}; padding:2px 10px; }}
+QFrame#card QLabel#statusKo {{ font-size:19px; font-weight:600; color:{ko_fg};
                      background:{ko_bg}; border-radius:8px; padding:2px 10px; }}
 QPushButton#primary {{ font-size:28px; border-radius:10px; border:2px solid {accent};
                        background:{accent_bg}; color:{accent_fg}; min-height:66px; }}

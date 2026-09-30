@@ -46,7 +46,8 @@ BAUD = 115200               # ignore en USB CDC, sans effet
 SCREEN_W, SCREEN_H = 800, 480
 
 # ------------------------------------------------------------ moteurs
-ESC_IDS = [10, 11]
+# Ordre = ordre d'affichage, de gauche a droite (ESC 11 a gauche).
+ESC_IDS = [11, 10]
 
 # Nombre de PAIRES de poles du moteur (pas le nombre de poles !).
 # Sert a convertir l'eRPM du VESC en RPM mecanique : RPM = eRPM / paires.
@@ -130,8 +131,8 @@ class TempCheck:
 
 
 ESC_TEMPS: List[TempCheck] = [
-    TempCheck("TEMP FET", "t_fet", T_FET_MAX),
-    TempCheck("TEMP MOT", "t_mot", T_MOT_MAX),
+    TempCheck("FET", "t_fet", T_FET_MAX),       # transistors du VESC
+    TempCheck("MOT", "t_mot", T_MOT_MAX),       # moteur
 ]
 
 
@@ -143,7 +144,7 @@ def temp_ok(t: float, limit: float, was_ok: bool = True) -> bool:
 def temp_text(label: str, t: float, ok: bool) -> str:
     if ok:
         return "%s : OK" % label
-    return "%s : NOT OK (%.0f °C)" % (label, t)
+    return "%s : NOT OK %.0f°C" % (label, t)
 
 
 def esc_offline_sub(_e: dict) -> str:
@@ -175,6 +176,7 @@ def target_text(d: dict) -> str:
 # Une valeur absente, invalide ou perimee s'affiche "--" : on n'affiche
 # jamais au pilote une vitesse ou un angle qui ne sont plus a jour.
 SPEED_LABEL = "Vitesse GPS"
+SPEED_LABEL_COURT = "Vitesse"      # carte vitesse de la page Moteurs
 SPEED_UNIT = "km/h"
 
 
