@@ -1,11 +1,15 @@
 #include "task_sonar.h"
+#include "rtos_com.h"
+#include "task_watchdog.h"
 
 // Définitions des variables
 float distance_filt[NB_CANAUX] = {SONAR_DISTANCE_REF_AVANT, SONAR_DISTANCE_REF_ARRIERE_GAUCHE, SONAR_DISTANCE_REF_ARRIERE_DROIT};
 int   PINS_SONARS[NB_CANAUX]   = {Analog_Sonar_Avant, Analog_Sonar_Arriere_Gauche, Analog_Sonar_Arriere_Droit};
+int   PINS_SONARS_IO[NB_CANAUX] = {I_O_Sonar_Avant, I_O_Sonar_Arriere_Gauche, I_O_Sonar_Arriere_Droit};
 
 float Sonar_distance[NB_CANAUX] = {SONAR_INIT_DISTANCE, SONAR_INIT_DISTANCE, SONAR_INIT_DISTANCE};
 float Sonar_temps_us            = SONAR_INIT_TIME;
+bool  Sonar_io[NB_CANAUX]       = {false, false, false};
 
 // Mutex
 extern SemaphoreHandle_t dataMutex;
@@ -13,7 +17,7 @@ extern SemaphoreHandle_t dataMutex;
 // Fonction lecture de sonar
 float lire_sonar(int pin, float &dist_filt)
 {
-  int raw = analogRead(pin);
+  int raw = adc_lire(pin);   // ADC partagé avec Task_Pilote
   float voltage = (raw / SONAR_ADC_BITS) * SONAR_VREF;
   float courant_mA = (voltage / SONAR_RESISTANCE) * 1000.0f;
   float newDist = (courant_mA - SONAR_I_MIN_MA) / (SONAR_I_MAX_MA - SONAR_I_MIN_MA)
@@ -31,6 +35,12 @@ float lire_sonar(int pin, float &dist_filt)
 void Task_LectureSonar(void *ptr)
 {
   (void) ptr;
+
+  // Sortie TOR PNP : pull-down → fil débranché = non valide
+  for(int i=0; i<NB_CANAUX; i++){
+    pinMode(PINS_SONARS_IO[i], arduino::INPUT_PULLDOWN);
+  }
+
   TickType_t lastWakeTime = xTaskGetTickCount();
 
   while (1)
@@ -38,10 +48,12 @@ void Task_LectureSonar(void *ptr)
     uint32_t t_debut = micros();
 
     float dist[NB_CANAUX];
+    bool  io[NB_CANAUX];
 
     for(int i=0; i<NB_CANAUX; i++){
       dist[i] = lire_sonar(PINS_SONARS[i], distance_filt[i]);
       distance_filt[i] = dist[i];
+      io[i] = (digitalRead(PINS_SONARS_IO[i]) == SONAR_IO_VALIDE);
     }
 
     float duree_us = (float)(micros() - t_debut);
@@ -50,11 +62,13 @@ void Task_LectureSonar(void *ptr)
     {
       for(int i=0; i<NB_CANAUX; i++){
         Sonar_distance[i] = dist[i];
+        Sonar_io[i]       = io[i];
       }
       Sonar_temps_us = duree_us;
       xSemaphoreGive(dataMutex);
     }
 
+    wd_vivant(T_SONAR);
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(PERIODE_SONAR_MS));
   }
 }

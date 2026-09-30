@@ -36,6 +36,7 @@ struct XsensData {
     float vx, vy, vz, speed;
     bool  vel_valid;
     float temps_us;
+    uint32_t t_ms;        // millis() du dernier paquet reçu (fraîcheur, watchdog)
 };
 
 extern XsensData Xsens_data;

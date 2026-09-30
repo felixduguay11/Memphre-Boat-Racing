@@ -1,4 +1,5 @@
 #include "task_xsens.h"
+#include "task_watchdog.h"
 
 extern SemaphoreHandle_t dataMutex;
 static MTi670 s_mti(Serial5, BAUD_Xsens);
@@ -8,7 +9,8 @@ XsensData Xsens_data = {
     .lat = 0.0,   .lon = 0.0,
     .altitude = 0.0f, .pos_valid = false, .alt_valid = false,
     .vx = 0.0f, .vy = 0.0f, .vz = 0.0f, .speed = 0.0f, .vel_valid = false,
-    .temps_us = 0.0f
+    .temps_us = 0.0f,
+    .t_ms = 0
 };
 float Xsens_temps_us = 0.0f;
 
@@ -201,6 +203,7 @@ void Task_Xsens(void *ptr)
     for (int i = 0; i < MAX_INIT_TRIES; i++)
     {
         s_mti.update();
+        wd_vivant(T_XSENS);
         if (s_mti.isReady()) break;
 
         s_mti.requestMeasurement();
@@ -248,12 +251,14 @@ void Task_Xsens(void *ptr)
                 }
 
                 Xsens_data.temps_us = duree_us;
+                Xsens_data.t_ms     = millis();
                 Xsens_temps_us      = duree_us;
 
                 xSemaphoreGive(dataMutex);
             }
         }
 
+        wd_vivant(T_XSENS);
         vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(PERIODE_Xsens_MS));
     }
 }
