@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import config as cfg
-from .widgets import Card, RowCard, Badge, EscCard, set_status_style
+from .widgets import Card, RowCard, SpeedCard, Badge, EscCard, set_status_style
 
 CENTER = Qt.AlignmentFlag.AlignCenter
 
@@ -211,22 +211,28 @@ class TelemetryScreen(QWidget):
             top.setColumnStretch(k, 1)              # colonnes de largeur egale
         root.addLayout(top)
 
+        # Rangee du milieu : ESC | vitesse GPS | ESC (ordre de cfg.ESC_IDS)
         grid = QGridLayout()
         grid.setSpacing(8)
         self._esc_cards = {}
         self._temp_ok = {}      # (id ESC, cle) -> etat precedent, pour l'hysteresis
+        cols = [0, 2]           # colonne 1 = vitesse
         for n, i in enumerate(esc_ids):
             c = EscCard("ESC %d" % i, cfg.esc_unit(), len(cfg.ESC_TEMPS))
-            grid.addWidget(c, n // 2, n % 2)
+            grid.addWidget(c, n // 2, cols[n % 2])
             self._esc_cards[i] = c
-        for k in range(2):
-            grid.setColumnStretch(k, 1)
+        self._speed = SpeedCard(cfg.SPEED_LABEL_COURT, cfg.SPEED_UNIT)
+        self._speed.setFixedWidth(220)
+        grid.addWidget(self._speed, 0, 1, max(1, (len(esc_ids) + 1) // 2), 1)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(2, 1)
         root.addLayout(grid, 1)     # les cartes ESC prennent la hauteur libre
 
         root.addWidget(_stop_button(self.stopped.emit))
 
     def update_data(self, d: dict):
         self._bar.update_data(d)
+        self._speed.set_value(cfg.speed_text(d))
 
         for m, card in self._metrics:
             try:
@@ -264,8 +270,9 @@ class TelemetryScreen(QWidget):
 
     def _esc_offline(self, esc_id, card, reason: str):
         card.set_value("--")
-        card.set_unit(reason)
+        card.set_unit("")
         card.clear_status()
+        card.set_status(0, reason, None)    # raison sous le chiffre (place)
         for chk in cfg.ESC_TEMPS:
             self._temp_ok.pop((esc_id, chk.key), None)
 

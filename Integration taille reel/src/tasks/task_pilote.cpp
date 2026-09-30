@@ -30,7 +30,7 @@ static int LireLevier(int raw)
 {
     if (raw <= LEVIER_RAW_MIN + LEVIER_DEADBAND) return 0;
     if (raw >= LEVIER_RAW_MAX) return 1023;
-    return (int)map_long(raw, LEVIER_RAW_MIN + LEVIER_DEADBAND, LEVIER_RAW_MAX, 0, 1023);
+    return (int)map_long(raw, LEVIER_RAW_MIN, LEVIER_RAW_MAX, 0, 1023);
 }
 
 // Sous ERPM_MIN_UTILE le moteur ne tourne pas proprement : dès que

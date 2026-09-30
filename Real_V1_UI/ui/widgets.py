@@ -2,7 +2,7 @@
 """widgets.py — briques reutilisables, sans logique metier."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QHBoxLayout
+from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy
 
 CENTER = Qt.AlignmentFlag.AlignCenter
 BOTTOM = Qt.AlignmentFlag.AlignBottom
@@ -58,6 +58,30 @@ class Card(QFrame):
     set_sub = set_unit                      # ancien nom, garde pour compatibilite
 
 
+class SpeedCard(QFrame):
+    """Etiquette, grande valeur centree, unite centree en dessous
+    (carte etroite : l'unite ne tient pas a cote du chiffre)."""
+
+    def __init__(self, label: str, unit: str, value_name: str = "speedMid"):
+        super().__init__()
+        self.setObjectName("card")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 6, 10, 8)
+        lay.setSpacing(0)
+        self._label = QLabel(label); self._label.setObjectName("cardLabel")
+        self._value = QLabel("--");  self._value.setObjectName(value_name)
+        self._unit = QLabel(unit);   self._unit.setObjectName("speedUnit")
+        self._value.setAlignment(CENTER)
+        self._unit.setAlignment(CENTER)
+        lay.addWidget(self._label)
+        lay.addStretch()
+        lay.addWidget(self._value)
+        lay.addWidget(self._unit)
+        lay.addStretch()
+
+    def set_value(self, text): self._value.setText(text)
+
+
 class RowCard(QFrame):
     """Une ligne : etiquette a gauche, grande valeur + unite a droite."""
 
@@ -87,6 +111,9 @@ class EscCard(QFrame):
     def __init__(self, label: str, unit: str, n_status: int):
         super().__init__()
         self.setObjectName("card")
+        # Largeur fixee par la grille, jamais par le texte : la mise en
+        # page ne bouge pas quand une valeur change de longueur.
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(14, 6, 14, 8)
         lay.setSpacing(2)
