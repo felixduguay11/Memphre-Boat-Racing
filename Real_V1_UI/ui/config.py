@@ -31,7 +31,7 @@ ESC_IDS = [10, 11]
 # Nombre de PAIRES de poles du moteur (pas le nombre de poles !).
 # Sert a convertir l'eRPM du VESC en RPM mecanique : RPM = eRPM / paires.
 # Mettre None si le nombre n'est pas connu -> affichage en eRPM brut.
-POLE_PAIRS = None
+POLE_PAIRS = 6
 
 
 # ------------------------------------------------------------ commandes
