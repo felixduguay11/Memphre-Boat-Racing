@@ -30,7 +30,7 @@ FLASH_MODE = "hex"
 
 # FW_DIR = dossier du firmware (git pull y est lance ; platformio.ini en mode pio).
 # PIO_BIN vide = cherche pio dans le PATH puis dans ~/.platformio.
-FW_DIR = "~/Memphre-Boat-Racing/Integration taille reel"  # Integration taille reel
+FW_DIR = "~/Memphre-Boat-Racing/TailleReel"  # Integration taille reel
 PIO_BIN = ""
 FW_HEX = FW_DIR + "/firmware/firmware.hex"
 # TEENSY_CLI vide = PATH (apt), puis ~/teensy_loader_cli/teensy_loader_cli
