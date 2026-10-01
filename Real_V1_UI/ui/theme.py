@@ -51,35 +51,46 @@ THEME_FILE = os.path.expanduser("~/.memphre_theme")
 
 _TEMPLATE = """
 QWidget        {{ background:{bg}; color:{text}; font-family:"{font}"; }}
-QLabel#title   {{ font-size:26px; font-weight:500; }}
-QLabel#hint    {{ font-size:15px; color:{muted}; }}
-QLabel#pill    {{ font-size:22px; font-weight:600; padding:6px 18px; border-radius:16px;
+QLabel#title   {{ font-size:32px; font-weight:600; }}
+QLabel#hint    {{ font-size:20px; color:{muted}; }}
+QLabel#barHint {{ font-size:18px; color:{muted}; }}
+QLabel#pill    {{ font-size:22px; font-weight:600; padding:6px 14px; border-radius:16px;
                   background:{ok_bg}; color:{ok_fg}; }}
-QLabel#pillKo  {{ font-size:22px; font-weight:600; padding:6px 18px; border-radius:16px;
+QLabel#pillKo  {{ font-size:22px; font-weight:600; padding:6px 14px; border-radius:16px;
                   background:{ko_bg}; color:{ko_fg}; }}
 QFrame#card    {{ background:{card}; border-radius:10px; }}
-QLabel#cardLabel {{ font-size:14px; color:{muted}; }}
-QLabel#cardValue {{ font-size:30px; font-weight:500; }}
-QLabel#cardSub   {{ font-size:14px; color:{muted}; }}
+QLabel#cardLabel {{ font-size:20px; color:{muted}; }}
+QLabel#cardValue {{ font-size:56px; font-weight:600; }}
+QLabel#cardUnit  {{ font-size:24px; color:{muted}; }}
+QLabel#cardSub   {{ font-size:18px; color:{muted}; }}
 QFrame#card QLabel {{ background:transparent; }}
-QLabel#escValue  {{ font-size:48px; font-weight:500; }}
-QLabel#statusOk   {{ font-size:20px; color:{ok_fg}; padding:3px 10px; }}
-QLabel#statusNone {{ font-size:20px; color:{muted}; padding:3px 10px; }}
-QFrame#card QLabel#statusKo {{ font-size:20px; font-weight:600; color:{ko_fg};
-                     background:{ko_bg}; border-radius:8px; padding:3px 10px; }}
-QPushButton#primary {{ font-size:22px; border-radius:10px; border:2px solid {accent};
+QLabel#escValue  {{ font-size:72px; font-weight:600; }}
+QLabel#speedValue {{ font-size:150px; font-weight:600; }}
+QLabel#speedUnit  {{ font-size:32px; color:{muted}; }}
+QLabel#speedMid   {{ font-size:80px; font-weight:600; }}
+QLabel#rowValue   {{ font-size:50px; font-weight:600; }}
+QLabel#smallValue {{ font-size:24px; font-weight:500; }}
+QLabel#statusOk   {{ font-size:19px; color:{ok_fg}; padding:2px 10px; }}
+QLabel#statusNone {{ font-size:19px; color:{muted}; padding:2px 10px; }}
+QFrame#card QLabel#statusKo {{ font-size:19px; font-weight:600; color:{ko_fg};
+                     background:{ko_bg}; border-radius:8px; padding:2px 10px; }}
+QPushButton#primary {{ font-size:28px; border-radius:10px; border:2px solid {accent};
                        background:{accent_bg}; color:{accent_fg}; min-height:66px; }}
-QPushButton#danger  {{ font-size:22px; border-radius:10px; border:2px solid {danger};
-                       background:{danger_bg}; color:{danger_fg}; min-height:66px; }}
-QPushButton#ghost {{ font-size:17px; border-radius:10px; border:1px solid {line};
+QPushButton#danger  {{ font-size:26px; border-radius:10px; border:2px solid {danger};
+                       background:{danger_bg}; color:{danger_fg}; min-height:54px; }}
+QPushButton#ghost {{ font-size:20px; border-radius:10px; border:1px solid {line};
                      background:transparent; color:{muted}; }}
+QPushButton#tab   {{ font-size:22px; border-radius:10px; border:1px solid {line};
+                     background:transparent; color:{muted}; }}
+QPushButton#tabOn {{ font-size:22px; font-weight:600; border-radius:10px; border:2px solid {accent};
+                     background:{accent_bg}; color:{accent_fg}; }}
 QPushButton:pressed {{ background:{press}; }}
 QPushButton:disabled {{ color:{line}; border-color:{line}; background:transparent; }}
 QPlainTextEdit#flashLog {{ background:{card}; color:{text}; border:none; border-radius:10px;
-                           padding:6px; font-family:"DejaVu Sans Mono"; font-size:12px; }}
-QLabel#flashOk   {{ font-size:18px; font-weight:600; color:{ok_fg}; }}
-QLabel#flashKo   {{ font-size:18px; font-weight:600; color:{ko_fg}; }}
-QLabel#flashBusy {{ font-size:18px; color:{accent_fg}; }}
+                           padding:6px; font-family:"DejaVu Sans Mono"; font-size:14px; }}
+QLabel#flashOk   {{ font-size:20px; font-weight:600; color:{ok_fg}; }}
+QLabel#flashKo   {{ font-size:20px; font-weight:600; color:{ko_fg}; }}
+QLabel#flashBusy {{ font-size:20px; color:{accent_fg}; }}
 """
 
 

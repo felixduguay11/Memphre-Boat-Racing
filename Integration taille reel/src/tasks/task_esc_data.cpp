@@ -32,13 +32,20 @@ void ESC_InitCAN()
     rawCan1.begin();
     rawCan1.setBaudRate(BAUD_CAN);
 
-    // Par défaut FlexCAN n'a que 4 mailboxes RX pour les trames
-    // étendues (celles des VESC). Real_V1 vidait le bus en continu ;
-    // ici la tâche passe toutes les 5 ms → 32 mailboxes : 0-15 RX
-    // étendues, 16-31 TX. À 250 kbps le bus porte ~1,9 trame/ms au
-    // max : 16 mailboxes = ~8 ms de marge avant perte.
+    // Mailboxes : 32 au total, 0-15 en RX étendues (trames des VESC),
+    // 16-31 en TX. C'est la disposition qui recevait bien au lac ; la
+    // disposition par défaut de FlexCAN_T4 (4 RX étendues, 4-7) ne
+    // reçoit rien sur ce montage.
+    //  1) setMaxMB(32)     : passe à 32 mailboxes. ATTENTION : il
+    //                        réinitialise AVANT de changer le nombre, les
+    //                        mailboxes 16-31 restent non initialisées...
+    //  2) enableFIFO(false): ...donc on relance la disposition par défaut
+    //                        sur les 32 : tout est effacé, 0-15 RX
+    //                        (0-7 std, 8-15 étendues), 16-31 TX valides.
+    //  3) setMB(0..7)      : 0-7 passent aussi en RX étendues.
     rawCan1.setMaxMB(32);
-    for (int i = 0; i < 16; i++) {
+    rawCan1.enableFIFO(false);
+    for (int i = 0; i < 8; i++) {
         rawCan1.setMB((FLEXCAN_MAILBOX)i, RX, EXT);
     }
 

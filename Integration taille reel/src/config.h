@@ -26,7 +26,7 @@
 #define PERIODE_RPI_MS              50   // 20Hz — télémétrie JSON (Real_V1 : TLM_MS)
 #define PERIODE_PILOTE_MS           20   // 50Hz
 #define PERIODE_PROP_MS             20   // 50Hz — envoi consigne VESC (Real_V1 : 20 ms)
-#define PERIODE_ESC_MS              5    // 200Hz — vidage du buffer CAN
+#define PERIODE_ESC_MS              5    // 200Hz — vidage du bus CAN (16 mailboxes RX étendues)
 #define PERIODE_WD_MS               100  // 10Hz
 #define FSM_TIMEOUT_MS              100  // sans événement pendant ce délai → pilote considéré absent
 //------------------------------------//
@@ -190,8 +190,8 @@
 
 // Levier : bornes réelles MESURÉES de l'ADC (10 bits).
 // Relevé au banc : repos = 230, butée = 730.
-#define LEVIER_RAW_MIN      230    // valeur au repos (levier relâché)
-#define LEVIER_RAW_MAX      730    // valeur à fond
+#define LEVIER_RAW_MIN      300    // valeur au repos (levier relâché)
+#define LEVIER_RAW_MAX      700    // valeur à fond
 #define LEVIER_DEADBAND     30     // sous ce delta au-dessus du MIN -> 0
 
 // Armement : tant que le levier n'a pas été vu au neutre une fois
@@ -200,7 +200,7 @@
 // ARMEMENT_REQUIS  1 = protection active (recommandé sur l'eau)
 //                  0 = désactivée, le levier répond tout de suite
 #define ARMEMENT_REQUIS     1
-#define LEVIER_RAW_ARME     300    // raw sous lequel le levier est « au neutre »
+#define LEVIER_RAW_ARME     330    // raw sous lequel le levier est « au neutre » (MIN + DEADBAND)
 //------------------------------------//
 
 
@@ -215,24 +215,24 @@
 // Hélices contrarotatives : les deux doivent tourner en sens
 // OPPOSÉS. Si le bateau recule quand le levier demande l'avant,
 // inverse les DEUX lignes. Jamais la même valeur.
-#define VESC_A_INVERSE      0
+#define VESC_A_INVERSE      1
 #define VESC_B_INVERSE      1
 
-#define RAMP_STEP           20       // changement max d'eRPM par cycle (20 ms)
+#define RAMP_STEP           80       // changement max d'eRPM par cycle (20 ms)
 #define ERPM_MIN_UTILE      1800
-#define ERPM_MAX_FORWARD    5500
-#define ERPM_MAX_REVERSE    3000     // magnitude ; le signe est mis dans le code
+#define ERPM_MAX_FORWARD    24000
+#define ERPM_MAX_REVERSE    4000     // magnitude ; le signe est mis dans le code
 #define PROP_CMD_TIMEOUT_MS 200      // commande FSM plus vieille → consigne 0
 
 // Limite de température — mêmes valeurs que config.py côté Pi
 // (T_FET_MAX, T_MOT_MAX, TEMP_HYST). Surchauffe → consigne
 // plafonnée à ERPM_MAX_SURCHAUFFE, retour quand toutes les temp.
 // sont sous (limite - TEMP_HYST).
-#define LIMITE_TEMP_ACTIVE  1        // 0 = surveillance désactivée
-#define T_FET_MAX           75.0f    // °C
-#define T_MOT_MAX           75.0f    // °C
+#define LIMITE_TEMP_ACTIVE  0        // 0 = surveillance désactivée
+#define T_FET_MAX           9999.0f    // °C
+#define T_MOT_MAX           9999.0f    // °C
 #define TEMP_HYST           3.0f     // °C
-#define ERPM_MAX_SURCHAUFFE 3000     // plafond de consigne en surchauffe
+#define ERPM_MAX_SURCHAUFFE 18000     // plafond de consigne en surchauffe
 //------------------------------------//
 
 
