@@ -16,6 +16,7 @@ sont éclatées par id (ex. "esc": [{"id": 10, "erpm": ...}] -> "esc10.erpm").
 import json
 import signal
 import sys
+import warnings
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
@@ -48,6 +49,11 @@ UNITS = {
     "ok":     ("Statut ESC",         "Statut",      ""),
 }
 
+
+# Champs à ignorer complètement (où qu'ils soient dans le JSON)
+IGNORE = {
+    "wd",
+}
 
 # Conversions appliquées au chargement : "champ": facteur multiplicatif
 # (t est enregistré en ms dans le log -> converti en secondes)
@@ -85,6 +91,8 @@ def flatten_record(obj, prefix=""):
     (utilise le champ 'id' s'il existe, sinon la position dans la liste)."""
     out = {}
     for key, val in obj.items():
+        if key in IGNORE:
+            continue
         name = f"{prefix}{key}"
         if isinstance(val, dict):
             out.update(flatten_record(val, name + "."))
@@ -104,6 +112,8 @@ def read_json_or_jsonl(path: str):
     with open(path, "r", encoding="utf-8") as f:
         text = f.read()
     try:
+        if path.lower().endswith(".jsonl"):
+            raise json.JSONDecodeError("jsonl", "", 0)   # toujours ligne par ligne
         return json.loads(text)
     except json.JSONDecodeError:
         # JSONL : un objet JSON par ligne (les lignes corrompues sont ignorées)
@@ -148,8 +158,14 @@ def load_json_to_dataframe(path: str) -> pd.DataFrame:
             if num.notna().mean() > 0.9:
                 df[col] = num
                 continue
+            # Une date contient forcément des chiffres : on ignore "RUN", "FORWARD"…
+            sample = df[col].dropna().astype(str).head(20)
+            if sample.empty or not sample.str.contains(r"\d").all():
+                continue
             try:
-                dates = pd.to_datetime(df[col], errors="coerce")
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    dates = pd.to_datetime(df[col], errors="coerce")
                 if dates.notna().mean() > 0.9:
                     df[col] = dates
             except (TypeError, ValueError):
