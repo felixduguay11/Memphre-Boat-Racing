@@ -50,7 +50,12 @@ class _PageBar(QHBoxLayout):
 
     def update_data(self, d: dict):
         self.mode.set_state(cfg.mode_text(d), cfg.mode_ok(d))
-        self.target.setText(cfg.target_text(d))
+        # Calibration du levier en cours (ex. lancee par la commande
+        # secrete F/R) : on affiche la mesure a la place de la consigne.
+        if cfg.calib_en_cours(d):
+            self.target.setText("CALIB " + cfg.calib_texte_mesure(d))
+        else:
+            self.target.setText(cfg.target_text(d))
 
 
 def _stop_button(slot) -> QPushButton:
@@ -66,6 +71,7 @@ class StartScreen(QWidget):
     quit_requested = Signal()
     theme_toggled = Signal()
     flash_requested = Signal()
+    calib_requested = Signal()
 
     def __init__(self, payload: dict = None):
         super().__init__()
@@ -78,14 +84,19 @@ class StartScreen(QWidget):
         bar = QHBoxLayout()
         self.theme_btn = QPushButton()
         self.theme_btn.setObjectName("ghost")
-        self.theme_btn.setFixedSize(200, 52)
+        self.theme_btn.setFixedSize(170, 52)
         self.theme_btn.clicked.connect(self.theme_toggled.emit)
         bar.addWidget(self.theme_btn)
         flash = QPushButton("Mise a jour Teensy")
         flash.setObjectName("ghost")
-        flash.setFixedSize(250, 52)
+        flash.setFixedSize(220, 52)
         flash.clicked.connect(self.flash_requested.emit)
         bar.addWidget(flash)
+        calib = QPushButton("Calibrer levier")
+        calib.setObjectName("ghost")
+        calib.setFixedSize(180, 52)
+        calib.clicked.connect(self.calib_requested.emit)
+        bar.addWidget(calib)
         bar.addStretch()
         bar.addWidget(_close_button(self.quit_requested.emit))
         root.addLayout(bar)
@@ -350,4 +361,91 @@ class XsensScreen(QWidget):
             set_status_style(w, ok)
         self._pos.setText(cfg.position_text(d))
         self._alt.setText(cfg.altitude_text(d))
+
+
+class CalibScreen(QWidget):
+    """Calibration du levier de vitesse.
+    Commencer -> bouger le levier butee a butee -> le remettre au repos
+    -> Terminer. Le Teensy enregistre min/max en EEPROM."""
+    start_requested = Signal()
+    finish_requested = Signal()
+    cancel_requested = Signal()
+    back_requested = Signal()
+
+    def __init__(self):
+        super().__init__()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 18, 22, 18)
+        root.setSpacing(10)
+
+        bar = QHBoxLayout()
+        titre = QLabel("Calibration du levier")
+        titre.setObjectName("title")
+        bar.addWidget(titre)
+        bar.addStretch()
+        self._back = QPushButton("Retour")
+        self._back.setObjectName("ghost")
+        self._back.setFixedSize(130, 52)
+        self._back.clicked.connect(self.back_requested.emit)
+        bar.addWidget(self._back)
+        root.addLayout(bar)
+
+        hint = QLabel("Switch ON a OFF. Appuyer sur Commencer, pousser le levier "
+                      "jusqu'en butee puis le ramener au repos, puis Terminer.")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        root.addWidget(hint)
+
+        root.addStretch(1)
+        self._mesure = QLabel("levier : --")
+        self._mesure.setObjectName("smallValue")
+        self._mesure.setAlignment(CENTER)
+        root.addWidget(self._mesure)
+        self._etat = QLabel("")
+        self._etat.setAlignment(CENTER)
+        self._etat.setWordWrap(True)
+        set_status_style(self._etat, None)
+        root.addWidget(self._etat)
+        root.addStretch(1)
+
+        row = QHBoxLayout()
+        self._go = QPushButton("Commencer")
+        self._go.setObjectName("primary")
+        self._go.clicked.connect(self.start_requested.emit)
+        self._fin = QPushButton("Terminer")
+        self._fin.setObjectName("primary")
+        self._fin.clicked.connect(self.finish_requested.emit)
+        self._annule = QPushButton("Annuler")
+        self._annule.setObjectName("danger")
+        self._annule.clicked.connect(self.cancel_requested.emit)
+        for b in (self._go, self._fin, self._annule):
+            row.addWidget(b)
+        root.addLayout(row)
+        self._show_buttons(False)
+
+    def _show_buttons(self, en_cours: bool):
+        self._go.setEnabled(not en_cours)
+        self._fin.setEnabled(en_cours)
+        self._annule.setEnabled(en_cours)
+        self._back.setEnabled(not en_cours)
+
+    def reset(self):
+        self._mesure.setText("levier : --")
+        self._etat.setText("")
+        set_status_style(self._etat, None)
+        self._show_buttons(False)
+
+    def update_data(self, d: dict):
+        en_cours = cfg.calib_en_cours(d)
+        self._show_buttons(en_cours)
+        self._mesure.setText(cfg.calib_texte_mesure(d))
+        if en_cours:
+            auto = cfg.calib_auto(d)
+            self._etat.setText("Calibration automatique : finit seule, laisser le levier au repos a la fin"
+                               if auto else "Calibration en cours (LED du Teensy clignote)")
+            set_status_style(self._etat, None)
+        else:
+            text, ok = cfg.calib_resultat(d)
+            self._etat.setText(text)
+            set_status_style(self._etat, ok)
 
