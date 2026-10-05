@@ -6,7 +6,9 @@
 //  hot, esc[]) → l'UI (Real_V1_UI) et l'outil d'analyse marchent
 //  sans modification. Champs ajoutés (objets imbriqués, aplatis
 //  par json_graph_ui.py en « imu.roll », « wd.pil.ok », ...) :
-//    arme, pil{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
+//    arme, cmode, pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
+//  ⚠ "target" / "ramped" sont dans l'unité de MODE_COMMANDE
+//    (cmode : ERPM = eRPM, DUTY = ‰, COURANT = 0,1 A).
 //
 //  Les données du watchdog sont dans LA MÊME trame : une trame
 //  séparée ferait afficher « absent de la trame » aux cartes ESC.
@@ -81,6 +83,7 @@ struct Snapshot {
     int   target;  float ramped;
     PiloteData pil;
     EscData    esc[NB_VESC];
+    CanStats   can;
     XsensData  xs;
     float dist[NB_CANAUX];  bool io[NB_CANAUX];
     float cmd[NB_CANAUX];   float h[NB_CANAUX];  float p_out;  float r_out;
@@ -96,6 +99,7 @@ static void lireSnapshot(Snapshot &s)
         s.target = Prop_target;   s.ramped = Prop_ramped;
         s.pil    = Pilote_data;
         for (int k = 0; k < NB_VESC; k++) s.esc[k] = ESC_data[k];
+        s.can    = ESC_can;
         s.xs     = Xsens_data;
         for (int i = 0; i < NB_CANAUX; i++) {
             s.dist[i] = Sonar_distance[i];
@@ -142,21 +146,36 @@ static void sendTelemetry()
            k ? "," : "", e.id, e.vivant ? 1 : 0, (long)e.erpm, fin(e.duty),
            fin(e.i_mot), fin(e.i_in), fin(e.v_in), fin(e.t_fet), fin(e.t_mot));
     }
-    ap("],\"arme\":%d", s.arme ? 1 : 0);
+    ap("],\"arme\":%d,\"cmode\":\"%s\"", s.arme ? 1 : 0, CMD_NOM);
 
     // --- Pilote ---
-    ap(",\"pil\":{\"on\":%d,\"fr\":%d,\"ctl\":%d,\"esc\":%d,\"lev\":%d,\"raw\":%d}",
+    // brut : switchs avant anti-rebond (bits 0 ON, 1 F/R, 2 CTL, 3 START)
+    ap(",\"pil\":{\"on\":%d,\"fr\":%d,\"ctl\":%d,\"esc\":%d,\"lev\":%d,\"raw\":%d,"
+       "\"brut\":%d,\"dcdc\":%d,\"cal\":%d,\"cal_res\":%d,\"lmin\":%d,\"lmax\":%d,"
+       "\"cmin\":%d,\"cmax\":%d}",
        s.pil.switch_on, s.pil.switch_fr, s.pil.switch_ctl, s.pil.esc_demarres,
-       s.pil.levier, s.pil.levier_raw);
+       s.pil.levier, s.pil.levier_raw,
+       s.pil.sw_brut, s.pil.dcdc ? 1 : 0, s.pil.calib, s.pil.cal_res,
+       s.pil.lev_min, s.pil.lev_max, s.pil.cal_min, s.pil.cal_max);
+
+    // --- Qualité du bus CAN ---
+    ap(",\"can\":{\"rx\":%lu,\"mal\":%lu,\"perdu\":%lu,\"inc\":%lu,\"txf\":%lu,"
+       "\"pct\":%.2f,\"pct_tot\":%.2f,\"ebus\":%lu,\"eack\":%lu,\"rec\":%u,\"tec\":%u,\"flt\":%u}",
+       (unsigned long)s.can.rx, (unsigned long)s.can.mal, (unsigned long)s.can.perdues,
+       (unsigned long)s.can.inconnues, (unsigned long)s.can.tx_echecs,
+       fin(s.can.pct_fenetre), fin(s.can.pct_total),
+       (unsigned long)s.can.err_bus, (unsigned long)s.can.err_ack,
+       (unsigned)s.can.rec, (unsigned)s.can.tec, (unsigned)s.can.flt);
 
     // --- Xsens ---
     bool frais = (millis() - s.xs.t_ms) <= XSENS_DONNEES_TIMEOUT_MS;
     ap(",\"imu\":{\"ok\":%d,\"frais\":%d,\"roll\":%.2f,\"pitch\":%.2f,\"yaw\":%.2f,"
-       "\"vok\":%d,\"v_kmh\":%.2f}",
+       "\"vok\":%d,\"v_kmh\":%.2f,\"vrej\":%lu}",
        s.xs.att_valid, frais ? 1 : 0, fin(s.xs.roll), fin(s.xs.pitch), fin(s.xs.yaw),
-       s.xs.vel_valid, fin(s.xs.speed * 3.6f));
-    ap(",\"gps\":{\"ok\":%d,\"lat\":%.7f,\"lon\":%.7f,\"alt_ok\":%d,\"alt\":%.1f}",
-       s.xs.pos_valid, fin(s.xs.lat), fin(s.xs.lon), s.xs.alt_valid, fin(s.xs.altitude));
+       s.xs.vel_valid, fin(s.xs.speed * 3.6f), (unsigned long)s.xs.v_rejets);
+    ap(",\"gps\":{\"ok\":%d,\"lat\":%.7f,\"lon\":%.7f,\"alt_ok\":%d,\"alt\":%.1f,\"prej\":%lu}",
+       s.xs.pos_valid, fin(s.xs.lat), fin(s.xs.lon), s.xs.alt_valid, fin(s.xs.altitude),
+       (unsigned long)s.xs.pos_rejets);
 
 #if FOILS_ACTIFS
     // --- Sonars + foils ---
@@ -196,7 +215,17 @@ static void handlePiCommand(const char* line)
     const char* p = strstr(line, "\"cmd\"");
     if (!p) return;
 
-    if (strstr(p, "start")) {
+    // Calibration du levier (testée AVANT start/stop) → Task_Pilote
+    if (strstr(p, "calib_fin")) {
+        xEventGroupSetBits(egEtat, EVT_CALIB_FIN);
+    }
+    else if (strstr(p, "calib_annule")) {
+        xEventGroupSetBits(egEtat, EVT_CALIB_ANNULE);
+    }
+    else if (strstr(p, "calib")) {
+        xEventGroupSetBits(egEtat, EVT_CALIB_DEBUT);
+    }
+    else if (strstr(p, "start")) {
         streaming = true;
         // Les gains PID arriveront ici plus tard (clé "pid").
     }
@@ -265,6 +294,7 @@ void Task_RPi(void *ptr)
 
 #if DEBUG_LEVIER
     // Calibration du levier : app Pi FERMÉE, screen /dev/ttyACM0.
+    // (Le bouton « Calibrer levier » de l UI remplace normalement ce relevé.)
     // Note la valeur au repos -> LEVIER_RAW_MIN, à fond -> LEVIER_RAW_MAX
     if (millis() - lastPrintMs >= 200) {
       lastPrintMs = millis();

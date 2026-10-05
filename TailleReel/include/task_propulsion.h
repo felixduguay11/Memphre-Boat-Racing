@@ -6,12 +6,12 @@
 //
 //  Lit la commande de la machine d'état (qCmd, xQueuePeek),
 //  applique les sécurités puis la rampe de Real_V1 et envoie
-//  la consigne eRPM aux deux VESC.
+//  la consigne aux deux VESC (eRPM, duty ou courant : MODE_COMMANDE).
 //
 //  Sécurités (indépendantes de la machine d'état) :
 //    - commande plus vieille que PROP_CMD_TIMEOUT_MS → 0
 //    - EVT_ERR_CRITIQUE (watchdog)                  → 0
-//    - EVT_SURCHAUFFE   (watchdog) → plafond ±ERPM_MAX_SURCHAUFFE
+//    - EVT_SURCHAUFFE   (watchdog) → plafond ±CMD_MAX_SURCHAUFFE
 // =====================================================
 
 #include <arduino_freertos.h>

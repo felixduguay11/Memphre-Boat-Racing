@@ -185,14 +185,61 @@
 // coupé = HIGH = état le plus sûr. Donc « actif » demande un LOW.
 #define SWITCH_ACTIF        0      // LOW
 // I_But_Start : indique si les ESC/moteurs ont été démarrés.
-// ⚠ polarité supposée identique aux switchs (pull-up, LOW = démarrés)
-#define ESC_DEMARRES_ACTIF  0      // LOW
+// Logs du 30/09 : HIGH = ESC démarrés. Avec ESC_DEMARRES_ACTIF = 1,
+// la pin est en INPUT_PULLDOWN → fil débranché = « non démarrés »
+// = DC-DC coupé (état sûr).
+#define ESC_DEMARRES_ACTIF  1      // HIGH
+
+// Anti-rebond (filtrage numérique) de TOUS les switchs/boutons :
+// I_Switch_ON, I_F_R, Relay_Control, I_But_Start.
+// Un changement d'état n'est accepté que s'il est vu N cycles
+// Task_Pilote (PERIODE_PILOTE_MS) de suite.
+#define SWITCH_ON_CYCLES    2      // 2 × 20 ms = 40 ms ON stable pour passer à ON (RUN)
+#define SWITCH_OFF_CYCLES   5      // 5 × 20 ms = 100 ms OFF stable pour couper
+
+// DC-DC (pin DC_DC_3V3 = 32) :
+//   I_But_Start (filtré) OFF                         → DC-DC ON
+//   I_But_Start (filtré) ON depuis PRECHARGE_MS       → DC-DC OFF
+//   (pendant les PRECHARGE_MS premières ms de ON, le DC-DC reste ON)
+//   I_But_Start retombe à OFF                         → DC-DC ON tout de suite
+#define DC_DC_ACTIF         1      // niveau de sortie = DC-DC alimenté (HIGH)
+#define PRECHARGE_MS        3000
 
 // Levier : bornes réelles MESURÉES de l'ADC (10 bits).
 // Relevé au banc : repos = 230, butée = 730.
+// Valeurs PAR DÉFAUT : remplacées par la calibration sauvegardée
+// en EEPROM si elle existe (voir CALIBRATION DU LEVIER).
 #define LEVIER_RAW_MIN      300    // valeur au repos (levier relâché)
 #define LEVIER_RAW_MAX      700    // valeur à fond
 #define LEVIER_DEADBAND     30     // sous ce delta au-dessus du MIN -> 0
+
+// Calibration du levier (Task_Pilote), lancée depuis l'UI du Pi
+// (bouton « Calibrer levier ») :
+//   1) switch ON à OFF (IDLE), sinon la demande est refusée
+//   2) « Commencer »  → {"cmd":"calib"}       : la LED 13 clignote
+//   3) bouger le levier butée à butée, le remettre au repos
+//   4) « Terminer »   → {"cmd":"calib_fin"}   : min/max sauvés en
+//      EEPROM si la course >= CALIB_PLAGE_MIN et que le levier est
+//      revenu au repos (LED fixe 2 s = OK)
+//      « Annuler »    → {"cmd":"calib_annule"}
+//   Passer le switch ON pendant la calibration l'annule.
+#define CALIB_LEVIER_ACTIVE 1
+#define CALIB_PLAGE_MIN     200    // course min (raw) pour accepter
+#define CALIB_MARGE_MAX     10     // retiré du max mesuré → 1023 atteignable
+#define CALIB_RETOUR_REPOS  40     // en fin de calib, raw <= min + ça
+#define CALIB_TIMEOUT_MS    60000  // jamais terminée → abandon
+
+// Commande secrète (sans écran tactile) : en IDLE (switch ON à OFF),
+// basculer le switch F/R CALIB_SECRET_NB fois (passages à actif) en
+// moins de CALIB_SECRET_FENETRE_MS → calibration AUTOMATIQUE :
+//   la LED 13 clignote, bouger le levier butée à butée pendant
+//   CALIB_AUTO_DUREE_MS, et le laisser AU REPOS à la fin.
+//   Fin automatique → sauvegarde si OK (LED fixe 2 s).
+//   Passer le switch ON l'annule.
+#define CALIB_SECRET_NB         5
+#define CALIB_SECRET_FENETRE_MS 4000
+#define CALIB_AUTO_DUREE_MS     10000
+#define CALIB_EEPROM_ADDR   0      // adresse de la structure en EEPROM
 
 // Armement : tant que le levier n'a pas été vu au neutre une fois
 // depuis le démarrage (ou depuis un retour en IDLE / ARRET), aucune
@@ -201,6 +248,8 @@
 //                  0 = désactivée, le levier répond tout de suite
 #define ARMEMENT_REQUIS     1
 #define LEVIER_RAW_ARME     330    // raw sous lequel le levier est « au neutre » (MIN + DEADBAND)
+// NB : appliqué en RELATIF au min calibré :
+//      neutre si raw <= min + (LEVIER_RAW_ARME - LEVIER_RAW_MIN)
 //------------------------------------//
 
 
@@ -218,10 +267,46 @@
 #define VESC_A_INVERSE      1
 #define VESC_B_INVERSE      1
 
+// ── Mode de commande des VESC ──
+// MODE_ERPM    : boucle de vitesse du VESC (ancien comportement)
+// MODE_DUTY    : levier → duty cycle (tension). Pas de boucle de
+//                vitesse ; vitesse bornée hors de l'eau.
+// MODE_COURANT : levier → courant moteur (couple). Plus doux au
+//                départ. ⚠ hélice hors de l'eau = le moteur monte
+//                jusqu'au duty max : limiter « Max ERPM » dans VESC
+//                Tool (voir recommandations mcconf).
+// Dans tous les modes, le VESC applique ses propres limites
+// (mcconf : Motor Current Max 147.87 A, Max Duty 0.95,
+// Battery Current Max 250 A). Le plafond vers 12 km/h vient de
+// « Motor Current Max » : ça se change dans VESC Tool, pas ici.
+#define MODE_ERPM           0
+#define MODE_DUTY           1
+#define MODE_COURANT        2
+#define MODE_COMMANDE       MODE_COURANT
+
+// eRPM (unité interne : eRPM)
 #define RAMP_STEP           80       // changement max d'eRPM par cycle (20 ms)
 #define ERPM_MIN_UTILE      1800
 #define ERPM_MAX_FORWARD    24000
 #define ERPM_MAX_REVERSE    4000     // magnitude ; le signe est mis dans le code
+
+// Duty (unité interne : ‰, 1000 = 100 %). Repère : 1800 eRPM ≈ 5 %,
+// 24000 eRPM ≈ 66 % (λ = 0.0105 Wb, 18S). Max VESC = 950.
+#define DUTY_RAMP_STEP      5        // ‰ par cycle (20 ms) = 25 %/s
+#define DUTY_MIN_UTILE      50
+#define DUTY_MAX_FORWARD    950
+#define DUTY_MAX_REVERSE    110
+#define DUTY_MAX_SURCHAUFFE 500
+
+// Courant moteur (unité interne : 0,1 A). Max VESC = 1478 (147.87 A).
+// Si tu montes « Motor Current Max » dans VESC Tool, monte aussi
+// COURANT_MAX_FORWARD (le VESC plafonne de toute façon au sien).
+#define COURANT_RAMP_STEP      30    // 3 A par cycle (20 ms) = 150 A/s
+#define COURANT_MIN_UTILE      50    // 5 A
+#define COURANT_MAX_FORWARD    3000  // 300 A
+#define COURANT_MAX_REVERSE    500   // 50 A
+#define COURANT_MAX_SURCHAUFFE 800   // 80 A
+
 #define PROP_CMD_TIMEOUT_MS 200      // commande FSM plus vieille → consigne 0
 
 // Limite de température — mêmes valeurs que config.py côté Pi
@@ -233,6 +318,52 @@
 #define T_MOT_MAX           9999.0f    // °C
 #define TEMP_HYST           3.0f     // °C
 #define ERPM_MAX_SURCHAUFFE 18000     // plafond de consigne en surchauffe
+
+// ── Consigne générique selon MODE_COMMANDE (ne pas modifier) ──
+#if MODE_COMMANDE == MODE_ERPM
+  #define CMD_NOM            "ERPM"
+  #define CMD_RAMP_STEP      RAMP_STEP
+  #define CMD_MIN_UTILE      ERPM_MIN_UTILE
+  #define CMD_MAX_FORWARD    ERPM_MAX_FORWARD
+  #define CMD_MAX_REVERSE    ERPM_MAX_REVERSE
+  #define CMD_MAX_SURCHAUFFE ERPM_MAX_SURCHAUFFE
+#elif MODE_COMMANDE == MODE_DUTY
+  #define CMD_NOM            "DUTY"
+  #define CMD_RAMP_STEP      DUTY_RAMP_STEP
+  #define CMD_MIN_UTILE      DUTY_MIN_UTILE
+  #define CMD_MAX_FORWARD    DUTY_MAX_FORWARD
+  #define CMD_MAX_REVERSE    DUTY_MAX_REVERSE
+  #define CMD_MAX_SURCHAUFFE DUTY_MAX_SURCHAUFFE
+#elif MODE_COMMANDE == MODE_COURANT
+  #define CMD_NOM            "COURANT"
+  #define CMD_RAMP_STEP      COURANT_RAMP_STEP
+  #define CMD_MIN_UTILE      COURANT_MIN_UTILE
+  #define CMD_MAX_FORWARD    COURANT_MAX_FORWARD
+  #define CMD_MAX_REVERSE    COURANT_MAX_REVERSE
+  #define CMD_MAX_SURCHAUFFE COURANT_MAX_SURCHAUFFE
+#else
+  #error "MODE_COMMANDE invalide"
+#endif
+//------------------------------------//
+
+
+//----------- QUALITÉ DU BUS CAN -----//
+// Statistiques publiées dans la télémétrie (clé "can") :
+// trames reçues / rejetées (mal formées, perdues) et erreurs bus.
+#define CAN_STATS_FENETRE_MS 1000    // fenêtre du pourcentage « récent »
+//------------------------------------//
+
+
+//------------ FILTRE GPS ------------//
+// Rejet des vitesses / positions aberrantes de l'Xsens (paquets
+// corrompus). Après GPS_REJETS_RESYNC rejets consécutifs, la
+// nouvelle valeur est acceptée (vrai saut, ex. premier fix).
+#define XSENS_RX_BUFFER       1024    // octets ajoutés au buffer RX de Serial5
+#define GPS_VITESSE_MAX_KMH   80.0f   // au-delà : rejet
+#define GPS_ACCEL_MAX_KMH_S   25.0f   // variation max plausible (km/h par seconde)
+#define GPS_SAUT_MIN_KMH      2.0f    // tolérance fixe (bruit)
+#define GPS_POS_SAUT_MAX_M    50.0f   // saut de position max entre deux trames
+#define GPS_REJETS_RESYNC     20      // rejets consécutifs → re-synchronisation
 //------------------------------------//
 
 
@@ -265,7 +396,7 @@
 // USB (Serial = /dev/ttyACM0 côté Pi), format JSON de Real_V1.
 #define HB_MS               500   // battement de cœur hors streaming
 #define PI_LINE_MAX         96
-#define RPI_JSON_MAX        1536
+#define RPI_JSON_MAX        2048
 #define DEBUG_PRINT         0     // texte lisible en plus du JSON (app Pi fermée)
 #define DEBUG_LEVIER        0     // 1 = imprime le raw ADC pour calibrer
 #define PRINT_MS            1000
@@ -286,7 +417,7 @@
 //#define PIN_10                      10
 //#define PIN_11                      11
 //#define PIN_12                      12
-#define LED                         13
+#define LED                         13   // SORTIE : clignote pendant la calibration du levier
 #define Analog_Sonar_Avant          14
 #define Analog_Sonar_Arriere_Gauche 15
 #define Analog_Sonar_Arriere_Droit  16
@@ -305,7 +436,7 @@
 //#define PIN_29                      29
 #define RX_Moteur                   30
 #define TX_Moteur                   31
-#define DC_DC_3V3                   32
+#define DC_DC_3V3                   32   // SORTIE : DC-DC (ON si I_But_Start OFF, OFF 3 s après I_But_Start ON)
 #define I_O_Sonar_Avant             33
 #define I_O_Sonar_Arriere_Gauche    34
 #define I_O_Sonar_Arriere_Droit     35

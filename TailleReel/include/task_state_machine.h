@@ -30,7 +30,7 @@
 // ─── Variables partagées (publiées par Task_StateMachine) ───
 extern ControlMode SM_mode;
 extern RunMode     SM_run;
-extern int         SM_target;      // consigne eRPM avant rampe / plafond
+extern int         SM_target;      // consigne (unité de MODE_COMMANDE) avant rampe / plafond
 extern bool        SM_arme;        // levier armé
 extern float       SM_temps_us;
 

@@ -19,7 +19,7 @@ float       SM_temps_us = 0.0f;
 static bool levierArme = false;
 
 // Snapshot « sûr » : switch ON relâché, levier au repos
-static const PiloteData PILOTE_SUR = {false, false, false, false, 0, 0, 0, 0};
+static const PiloteData PILOTE_SUR = {};   // tout à false / 0
 
 // FORWARD → CONTROLE (entrée) / CONTROLE → FORWARD (sortie, hystérésis)
 static bool ControleAutorise(bool deja_en_controle, const PiloteData &p,
@@ -106,7 +106,7 @@ void Task_StateMachine(void *ptr)
             // Armement : on refuse toute consigne tant que le levier
             // n'a pas été vu au neutre au moins une fois.
             if (ARMEMENT_REQUIS && !levierArme) {
-                if (pil.levier_raw <= LEVIER_RAW_ARME) levierArme = true;
+                if (pil.au_neutre) levierArme = true;   // seuil relatif au min calibré
                 currentRunMode = RunMode::NEUTRAL;
                 target         = 0;
             }

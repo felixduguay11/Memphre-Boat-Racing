@@ -1,6 +1,7 @@
 // =====================================================
 //  task_propulsion.cpp
 //  Tâche FreeRTOS — propulsion, 50 Hz.
+//  Consigne en eRPM, duty ou courant selon MODE_COMMANDE (config.h).
 //  Rampe et envoi repris de Real_V1 (fonction StateMachine(target)).
 // =====================================================
 
@@ -22,30 +23,31 @@ static inline int iclamp(int v, int lo, int hi) { return (v < lo) ? lo : (v > hi
 static void AppliquerConsigne(int target)
 {
     if (target == 0) {
-        // Arret : coupure nette. En mode vitesse, une consigne sous le
-        // Minimum ERPM du VESC laisse le moteur en roue libre (pas de frein).
+        // Arret : coupure nette. ERPM : une consigne sous le Minimum ERPM
+        // du VESC laisse le moteur en roue libre. DUTY / COURANT : courant 0
+        // envoyé = moteur relâché (voir ESC_EnvoyerConsigne).
         rampedTarget = 0;
     } else {
         bool memeSens = (rampedTarget > 0) == (target > 0);
 
         // Depart a l'arret, ou inversion une fois redescendu au minimum :
-        // on saute directement a ERPM_MIN_UTILE au lieu de traverser
-        // la zone 0..1800 ou le moteur tourne mal.
+        // on saute directement a CMD_MIN_UTILE au lieu de traverser
+        // la zone ou le moteur tourne mal.
         if (rampedTarget == 0 ||
-            (!memeSens && fabsf(rampedTarget) <= ERPM_MIN_UTILE)) {
-            rampedTarget = (target > 0) ? ERPM_MIN_UTILE : -ERPM_MIN_UTILE;
+            (!memeSens && fabsf(rampedTarget) <= CMD_MIN_UTILE)) {
+            rampedTarget = (target > 0) ? CMD_MIN_UTILE : -CMD_MIN_UTILE;
         }
 
         // Rampe normale au-dessus du minimum (et descente progressive
         // avant une inversion de sens, pour menager les helices).
         if (rampedTarget < target) {
-            rampedTarget = fminf(rampedTarget + RAMP_STEP, (float)target);
+            rampedTarget = fminf(rampedTarget + CMD_RAMP_STEP, (float)target);
         } else if (rampedTarget > target) {
-            rampedTarget = fmaxf(rampedTarget - RAMP_STEP, (float)target);
+            rampedTarget = fmaxf(rampedTarget - CMD_RAMP_STEP, (float)target);
         }
     }
 
-    ESC_EnvoyerERPM((int32_t)(VESC_A_INVERSE ? -rampedTarget : rampedTarget),
+    ESC_EnvoyerConsigne((int32_t)(VESC_A_INVERSE ? -rampedTarget : rampedTarget),
                     (int32_t)(VESC_B_INVERSE ? -rampedTarget : rampedTarget));
 }
 
@@ -76,7 +78,7 @@ void Task_Propulsion(void *ptr)
         if (bits & EVT_ERR_CRITIQUE) target = 0;
 #if LIMITE_TEMP_ACTIVE
         if (bits & EVT_SURCHAUFFE) {
-            target = iclamp(target, -ERPM_MAX_SURCHAUFFE, ERPM_MAX_SURCHAUFFE);
+            target = iclamp(target, -CMD_MAX_SURCHAUFFE, CMD_MAX_SURCHAUFFE);
         }
 #endif
 
@@ -98,5 +100,5 @@ void Task_Propulsion(void *ptr)
     }
 }
 
-static_assert(ERPM_MAX_SURCHAUFFE >= ERPM_MIN_UTILE,
+static_assert(CMD_MAX_SURCHAUFFE >= CMD_MIN_UTILE,
               "le plafond de surchauffe doit rester dans la plage utile");
