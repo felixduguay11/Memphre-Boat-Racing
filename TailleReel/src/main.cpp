@@ -32,6 +32,11 @@ EventGroupHandle_t egEtat;
 
 void setup()
 {
+  // DC-DC ON dès le boot (I_But_Start supposé OFF) ; Task_Pilote
+  // le coupe 3 s après que I_But_Start passe à ON.
+  pinMode(DC_DC_3V3, arduino::OUTPUT);
+  digitalWrite(DC_DC_3V3, DC_DC_ACTIF ? 1 : 0);
+
   Serial.begin(BAUD_USB);             // USB CDC : le débit est ignoré
 
   // ADC 10 bits partout (levier + sonars)

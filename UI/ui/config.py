@@ -61,6 +61,22 @@ POLE_PAIRS = 4
 START_PAYLOAD = {"cmd": "start"}
 STOP_PAYLOAD = {"cmd": "stop"}
 
+# Calibration du levier (ecran « Calibrer levier »). Le Teensy n'accepte
+# la calibration qu'en IDLE (switch ON a OFF) et sauve min/max en EEPROM.
+CALIB_START_PAYLOAD = {"cmd": "calib"}
+CALIB_FIN_PAYLOAD = {"cmd": "calib_fin"}
+CALIB_ANNULE_PAYLOAD = {"cmd": "calib_annule"}
+
+# Resultat renvoye par le Teensy dans "pil": {"cal_res": n}
+CALIB_RESULTATS = {
+    0: "",
+    1: "Calibration enregistree",
+    2: "Refusee : course du levier trop courte",
+    3: "Refusee : remettre le levier au repos avant Terminer",
+    4: "Calibration annulee",
+    5: "Refusee : mettre le switch ON a OFF",
+}
+
 
 # ------------------------------------------------------------ helpers telemetrie
 def _escs(d: dict) -> list:
@@ -165,8 +181,44 @@ def mode_ok(d: dict) -> bool:
 
 
 def target_text(d: dict) -> str:
-    """Consigne moteur — affichee dans la barre du haut, pas dans les cartes."""
-    return "consigne %d eRPM" % int(d.get("target", 0))
+    """Consigne moteur — affichee dans la barre du haut, pas dans les cartes.
+    L'unite depend du mode de commande du Teensy (cle "cmode")."""
+    v = int(d.get("target", 0))
+    mode = d.get("cmode", "ERPM")
+    if mode == "COURANT":
+        return "consigne %.1f A" % (v / 10.0)
+    if mode == "DUTY":
+        return "consigne %.1f %%" % (v / 10.0)
+    return "consigne %d eRPM" % v
+
+
+# ------------------------------------------------------------ calibration levier
+def _pil(d: dict) -> dict:
+    return d.get("pil") or {}
+
+
+def calib_en_cours(d: dict) -> bool:
+    return bool(_pil(d).get("cal"))
+
+
+def calib_auto(d: dict) -> bool:
+    """cal = 2 : lancee par la commande secrete (F/R bascule 5 fois en IDLE)."""
+    return _pil(d).get("cal") == 2
+
+
+def calib_texte_mesure(d: dict) -> str:
+    p = _pil(d)
+    if "raw" not in p:
+        return "levier : --"
+    if p.get("cal"):
+        return "levier %d   (min %d / max %d)" % (p["raw"], p.get("cmin", 0), p.get("cmax", 0))
+    return "levier %d   (bornes en service %d / %d)" % (p["raw"], p.get("lmin", 0), p.get("lmax", 0))
+
+
+def calib_resultat(d: dict):
+    """(texte, ok) ; ok = None si rien a afficher."""
+    n = int(_pil(d).get("cal_res", 0))
+    return CALIB_RESULTATS.get(n, "resultat %d" % n), (None if n == 0 else n == 1)
 
 
 # ------------------------------------------------------------ page Xsens

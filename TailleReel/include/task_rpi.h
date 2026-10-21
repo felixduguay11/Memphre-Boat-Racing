@@ -12,6 +12,7 @@
 //  Seule tâche qui écrit/lit sur Serial (USB = /dev/ttyACM0).
 //  Protocole de Real_V1 :
 //    Pi → Teensy : {"cmd":"start"} / {"cmd":"stop"}
+//                  {"cmd":"calib"} / {"cmd":"calib_fin"} / {"cmd":"calib_annule"}
 //    Teensy → Pi : télémétrie JSON à 20 Hz si streaming,
 //                  sinon {"type":"hb",...} toutes les HB_MS.
 // =====================================================

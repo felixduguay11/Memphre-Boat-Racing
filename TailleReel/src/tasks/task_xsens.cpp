@@ -1,5 +1,6 @@
 #include "task_xsens.h"
 #include "task_watchdog.h"
+#include <cmath>
 
 extern SemaphoreHandle_t dataMutex;
 static MTi670 s_mti(Serial5, BAUD_Xsens);
@@ -10,9 +11,16 @@ XsensData Xsens_data = {
     .altitude = 0.0f, .pos_valid = false, .alt_valid = false,
     .vx = 0.0f, .vy = 0.0f, .vz = 0.0f, .speed = 0.0f, .vel_valid = false,
     .temps_us = 0.0f,
-    .t_ms = 0
+    .t_ms = 0,
+    .v_rejets = 0, .pos_rejets = 0
 };
 float Xsens_temps_us = 0.0f;
+
+// Mémoire ajoutée au buffer RX de Serial5 (64 octets par défaut) :
+// à 115200 bauds, ~115 octets arrivent par période de 10 ms. Un
+// retard de la tâche faisait déborder le buffer → octets perdus →
+// paquets corrompus (vitesse 4.9e17 km/h dans les logs du 30/09).
+static uint8_t s_rxBuffer[XSENS_RX_BUFFER];
 
 
 MTi670::MTi670(HardwareSerial& serial, uint32_t baud)
@@ -139,11 +147,12 @@ void MTi670::parseMTData2(uint8_t* p, uint8_t plen)
         uint16_t id  = ((uint16_t)p[i] << 8) | p[i + 1];
         uint8_t  len = p[i + 2];
         uint8_t* d   = &p[i + 3];
+        if (i + 3 + len > plen) break;   // champ tronqué : on lirait hors du paquet
         i += 3 + len;
 
-        switch (id) {
+        switch (id & XDA_MASQUE) {
             case XDA_EULER_ANGLES:
-                if (len >= 12) {
+                if (len == 12) {
                     _roll      = beFloat(d);
                     _pitch     = beFloat(d + 4);
                     _yaw       = beFloat(d + 8);
@@ -151,20 +160,27 @@ void MTi670::parseMTData2(uint8_t* p, uint8_t plen)
                 }
                 break;
             case XDA_LAT_LON:
-                if (len >= 16) {
+                if (len == 16) {                 // Float64
                     _lat       = beDouble(d);
                     _lon       = beDouble(d + 8);
+                    _pos_valid = true;
+                } else if (len == 8) {           // Float32
+                    _lat       = beFloat(d);
+                    _lon       = beFloat(d + 4);
                     _pos_valid = true;
                 }
                 break;
             case XDA_ALT:
-                if (len >= 4) {
+                if (len == 8) {                  // Float64
+                    _altitude  = (float)beDouble(d);
+                    _alt_valid = true;
+                } else if (len == 4) {           // Float32
                     _altitude  = beFloat(d);
                     _alt_valid = true;
                 }
                 break;
             case XDA_VELOCITY_XYZ:
-                if (len >= 12) {
+                if (len == 12) {
                     _vx        = beFloat(d);
                     _vy        = beFloat(d + 4);
                     _vz        = beFloat(d + 8);
@@ -192,10 +208,101 @@ double MTi670::beDouble(const uint8_t* p)
     double d; memcpy(&d, &u, 8); return d;
 }
 
+// =====================================================
+//  Filtre de plausibilité GPS (vitesse + position)
+//  Une valeur est rejetée si non finie, hors bornes, ou si elle
+//  saute plus que ce qu'un bateau peut faire depuis la dernière
+//  valeur acceptée. Après GPS_REJETS_RESYNC rejets de suite, on
+//  accepte (vrai changement, ex. premier fix ou longue coupure).
+//  Puis médiane sur 3 valeurs acceptées pour la vitesse.
+// =====================================================
+struct FiltreGps {
+    bool     v_init = false;
+    float    v_kmh  = 0.0f;       // dernière vitesse acceptée
+    uint32_t v_ms   = 0;
+    uint16_t v_rej_suite = 0;
+    float    hist[3] = {0, 0, 0};
+    uint8_t  n_hist = 0;
+
+    bool     p_init = false;
+    double   lat = 0.0, lon = 0.0;
+    uint16_t p_rej_suite = 0;
+};
+
+static FiltreGps s_fgps;
+
+static float mediane3(float a, float b, float c)
+{
+    if (a > b) { float t = a; a = b; b = t; }
+    if (b > c) { b = c; }
+    return (a > b) ? a : b;
+}
+
+// Retourne true si la vitesse est acceptée ; *v_filt = vitesse filtrée (m/s)
+static bool filtreVitesse(float vx, float vy, float vz, float speed_ms, uint32_t now, float *v_filt)
+{
+    FiltreGps &f = s_fgps;
+    float v_kmh = speed_ms * 3.6f;
+
+    bool ok = std::isfinite(vx) && std::isfinite(vy) && std::isfinite(vz) && std::isfinite(speed_ms)
+              && v_kmh >= 0.0f && v_kmh <= GPS_VITESSE_MAX_KMH
+              && fabsf(vz) * 3.6f <= GPS_VITESSE_MAX_KMH;
+
+    if (ok && f.v_init) {
+        float dt_s  = (float)(now - f.v_ms) / 1000.0f;
+        float saut  = GPS_SAUT_MIN_KMH + GPS_ACCEL_MAX_KMH_S * dt_s;
+        if (fabsf(v_kmh - f.v_kmh) > saut && f.v_rej_suite < GPS_REJETS_RESYNC) ok = false;
+    }
+    // valeur non finie / hors bornes : jamais acceptée, même en re-synchro
+
+    if (!ok) {
+        if (f.v_rej_suite < 0xFFFF) f.v_rej_suite++;
+        return false;
+    }
+
+    f.v_init      = true;
+    f.v_kmh       = v_kmh;
+    f.v_ms        = now;
+    f.v_rej_suite = 0;
+
+    f.hist[0] = f.hist[1];
+    f.hist[1] = f.hist[2];
+    f.hist[2] = speed_ms;
+    if (f.n_hist < 3) f.n_hist++;
+    *v_filt = (f.n_hist < 3) ? speed_ms : mediane3(f.hist[0], f.hist[1], f.hist[2]);
+    return true;
+}
+
+static bool filtrePosition(double lat, double lon)
+{
+    FiltreGps &f = s_fgps;
+    bool ok = std::isfinite(lat) && std::isfinite(lon) &&
+              fabs(lat) <= 90.0 && fabs(lon) <= 180.0 &&
+              !(lat == 0.0 && lon == 0.0);
+
+    if (ok && f.p_init && f.p_rej_suite < GPS_REJETS_RESYNC) {
+        double dn = (lat - f.lat) * 111320.0;
+        double de = (lon - f.lon) * 111320.0 * cos(f.lat * 0.017453292519943295);
+        if (sqrt(dn * dn + de * de) > GPS_POS_SAUT_MAX_M) ok = false;
+    }
+
+    if (!ok) {
+        if (f.p_rej_suite < 0xFFFF) f.p_rej_suite++;
+        return false;
+    }
+    f.p_init = true;
+    f.lat = lat;
+    f.lon = lon;
+    f.p_rej_suite = 0;
+    return true;
+}
+
 void Task_Xsens(void *ptr)
 {
     (void) ptr;
 
+    // Buffer RX agrandi (Serial5 = port de l'Xsens, voir s_rxBuffer)
+    Serial5.addMemoryForRead(s_rxBuffer, sizeof(s_rxBuffer));
     s_mti.begin();
 
     const int MAX_INIT_TRIES = 10;  // 10 × 500ms = 5s max
@@ -235,19 +342,28 @@ void Task_Xsens(void *ptr)
                 Xsens_data.pos_valid = s_mti._pos_valid;
                 Xsens_data.alt_valid = s_mti._alt_valid;
                 if (s_mti._pos_valid) {
-                    Xsens_data.lat = s_mti._lat;
-                    Xsens_data.lon = s_mti._lon;
+                    if (filtrePosition(s_mti._lat, s_mti._lon)) {
+                        Xsens_data.lat = s_mti._lat;
+                        Xsens_data.lon = s_mti._lon;
+                    } else {
+                        Xsens_data.pos_rejets++;   // on garde la dernière position plausible
+                    }
                 }
-                if (s_mti._alt_valid) {
+                if (s_mti._alt_valid && std::isfinite(s_mti._altitude)) {
                     Xsens_data.altitude = s_mti._altitude;
                 }
 
                 Xsens_data.vel_valid = s_mti._vel_valid;
                 if (s_mti._vel_valid) {
-                    Xsens_data.vx    = s_mti._vx;
-                    Xsens_data.vy    = s_mti._vy;
-                    Xsens_data.vz    = s_mti._vz;
-                    Xsens_data.speed = s_mti._speed;
+                    float v_filt;
+                    if (filtreVitesse(s_mti._vx, s_mti._vy, s_mti._vz, s_mti._speed, millis(), &v_filt)) {
+                        Xsens_data.vx    = s_mti._vx;
+                        Xsens_data.vy    = s_mti._vy;
+                        Xsens_data.vz    = s_mti._vz;
+                        Xsens_data.speed = v_filt;
+                    } else {
+                        Xsens_data.v_rejets++;     // on garde la dernière vitesse plausible
+                    }
                 }
 
                 Xsens_data.temps_us = duree_us;

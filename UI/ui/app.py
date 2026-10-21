@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication, QStackedWidget
 from . import config as cfg
 from . import theme
 from .link import make_link
-from .screens import StartScreen, TelemetryScreen, XsensScreen, FlashScreen
+from .screens import StartScreen, TelemetryScreen, XsensScreen, FlashScreen, CalibScreen
 from .flasher import TeensyFlasher
 from .logger import TelemetryLogger
 
@@ -25,10 +25,12 @@ class MainWindow(QStackedWidget):
         self.telemetry_screen = TelemetryScreen()
         self.xsens_screen = XsensScreen()
         self.flash_screen = FlashScreen()
+        self.calib_screen = CalibScreen()
         self.addWidget(self.start_screen)
         self.addWidget(self.telemetry_screen)
         self.addWidget(self.xsens_screen)
         self.addWidget(self.flash_screen)
+        self.addWidget(self.calib_screen)
 
         # Pages de telemetrie (onglets), toutes alimentees par la trame
         self._pages = {"moteurs": self.telemetry_screen, "xsens": self.xsens_screen}
@@ -48,6 +50,14 @@ class MainWindow(QStackedWidget):
         self.start_screen.quit_requested.connect(self._quit)
         self.start_screen.theme_toggled.connect(self._toggle_theme)
         self.start_screen.flash_requested.connect(self._open_flash)
+        self.start_screen.calib_requested.connect(self._open_calib)
+        self.calib_screen.start_requested.connect(
+            lambda: self.link.send(cfg.CALIB_START_PAYLOAD))
+        self.calib_screen.finish_requested.connect(
+            lambda: self.link.send(cfg.CALIB_FIN_PAYLOAD))
+        self.calib_screen.cancel_requested.connect(
+            lambda: self.link.send(cfg.CALIB_ANNULE_PAYLOAD))
+        self.calib_screen.back_requested.connect(self._close_calib)
         self.flash_screen.run_requested.connect(self._start_flash)
         self.flash_screen.back_requested.connect(
             lambda: self.setCurrentWidget(self.start_screen))
@@ -79,6 +89,8 @@ class MainWindow(QStackedWidget):
             for page in self._pages.values():
                 page.update_data(d)
             self.logger.write(d)
+        elif self.currentWidget() is self.calib_screen:
+            self.calib_screen.update_data(d)
 
     def _show_page(self, key: str):
         self.setCurrentWidget(self._pages[key])
@@ -100,6 +112,19 @@ class MainWindow(QStackedWidget):
         self.link.send(cfg.STOP_PAYLOAD)
         self._streaming = False
         self.logger.stop()
+        self.setCurrentWidget(self.start_screen)
+
+    # ------------------------------------------------------------ calibration levier
+    def _open_calib(self):
+        # La telemetrie est necessaire pour voir le levier : on demande
+        # le flux au Teensy, sans journaliser.
+        self.calib_screen.reset()
+        self.setCurrentWidget(self.calib_screen)
+        self.link.send(cfg.START_PAYLOAD)
+
+    def _close_calib(self):
+        self.link.send(cfg.CALIB_ANNULE_PAYLOAD)   # sans effet si rien en cours
+        self.link.send(cfg.STOP_PAYLOAD)
         self.setCurrentWidget(self.start_screen)
 
     # ------------------------------------------------------------ mise a jour Teensy

@@ -14,10 +14,14 @@
 #define MID_ERROR           0x42
 
 // ─── XDA Identifiers ──────────────────────────────────────────────────────────
-#define XDA_EULER_ANGLES    0x2030
-#define XDA_LAT_LON         0x5020
-#define XDA_ALT             0x5030
-#define XDA_VELOCITY_XYZ    0xD010
+// Les 4 bits de poids faible = format (bits 0-1 : 0 Float32,
+// 3 Float64) + repère. On compare l'ID masqué (XDA_MASQUE) et
+// on décode selon la longueur reçue.
+#define XDA_MASQUE          0xFFF0
+#define XDA_EULER_ANGLES    0x2030   // 3 × Float32 (12 octets)
+#define XDA_LAT_LON         0x5040   // LatLon : 2 × Float64 (16) ou 2 × Float32 (8)
+#define XDA_ALT             0x5020   // AltitudeEllipsoid : Float64 (8) ou Float32 (4)
+#define XDA_VELOCITY_XYZ    0xD010   // 3 × Float32 (12 octets)
 
 // Limite max de bytes lus par appel à update()
 // Empêche update() de boucler trop longtemps si le buffer
@@ -37,6 +41,8 @@ struct XsensData {
     bool  vel_valid;
     float temps_us;
     uint32_t t_ms;        // millis() du dernier paquet reçu (fraîcheur, watchdog)
+    uint32_t v_rejets;    // vitesses rejetées par le filtre (cumul)
+    uint32_t pos_rejets;  // positions rejetées par le filtre (cumul)
 };
 
 extern XsensData Xsens_data;

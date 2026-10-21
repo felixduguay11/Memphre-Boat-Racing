@@ -8,6 +8,7 @@
 //   Task_StateMachine ─(qCmd : mailbox, 1 place)──► Task_Propulsion
 //   Task_StateMachine ─(egEtat : bits d'état)─────► Propulsion, Foils
 //   Task_Watchdog ─────(egEtat : bits d'erreur)───► StateMachine, Propulsion
+//   Task_RPi ──────────(egEtat : EVT_CALIB_*)─────► Pilote (calibration levier)
 //   Tâches ───────────(Shared Data, dataMutex)────► RPi, Watchdog, FSM
 //
 //  qCmd est une « mailbox » : longueur 1, écrite par xQueueOverwrite()
@@ -35,8 +36,21 @@ struct PiloteData {
     bool esc_demarres;   // I_But_Start actif  → ESC/moteurs démarrés
     int  levier_raw;     // ADC brut (10 bits)
     int  levier;         // levier nettoyé 0..1023 (0 = repos / deadband)
-    int  target_fwd;     // consigne eRPM si marche avant  (0 ou ERPM_MIN_UTILE..MAX)
-    int  target_rev;     // consigne eRPM si marche arrière (0 ou -MIN..-MAX)
+    int  target_fwd;     // consigne si marche avant  (0 ou CMD_MIN_UTILE..CMD_MAX_FORWARD)
+    int  target_rev;     // consigne si marche arrière (0 ou -CMD_MIN_UTILE..-CMD_MAX_REVERSE)
+                         // unité selon MODE_COMMANDE : eRPM / ‰ duty / 0,1 A
+    // ── Ajouts (en fin de struct : les initialisations courtes restent valides) ──
+    bool    au_neutre;   // levier sous le seuil d'armement (relatif au min calibré)
+    bool    dcdc;        // sortie DC_DC_3V3 active (OFF 3 s après I_But_Start ON)
+    uint8_t sw_brut;     // lecture brute des switchs avant anti-rebond (bits : 0 ON, 1 F/R, 2 CTL, 3 START)
+    uint8_t calib;       // 1 = calibration en cours (UI), 2 = calibration auto (commande secrète)
+    uint8_t cal_res;     // dernier résultat : 0 aucun, 1 OK, 2 course trop courte,
+                         //   3 levier pas revenu au repos, 4 annulée (UI / ON / timeout),
+                         //   5 refusée (switch ON actif)
+    int16_t lev_min;     // bornes du levier en service (calibration ou config.h)
+    int16_t lev_max;
+    int16_t cal_min;     // min / max vus pendant la calibration en cours
+    int16_t cal_max;
 };
 
 // ─── Événements reçus par la machine d'état (qEvents) ───
@@ -51,7 +65,7 @@ struct FsmEvent {
 struct FsmCmd {
     ControlMode mode;
     RunMode     run;
-    int32_t     target;  // consigne eRPM signée, avant rampe
+    int32_t     target;  // consigne signée (unité de MODE_COMMANDE), avant rampe
     TickType_t  tick;    // xTaskGetTickCount() à la publication
 };
 
@@ -66,6 +80,11 @@ struct FsmCmd {
 #define EVT_ERR_CAPTEUR    (1UL << 9)   // → pas de CONTROLE
 #define EVT_SURCHAUFFE     (1UL << 10)  // → consigne plafonnée
 #define EVT_WD_MASK        (EVT_ERR_CRITIQUE | EVT_ERR_CAPTEUR | EVT_SURCHAUFFE)
+// Écrits par Task_RPi (commandes du Pi), lus et effacés par Task_Pilote
+#define EVT_CALIB_DEBUT    (1UL << 16)  // {"cmd":"calib"}
+#define EVT_CALIB_FIN      (1UL << 17)  // {"cmd":"calib_fin"}
+#define EVT_CALIB_ANNULE   (1UL << 18)  // {"cmd":"calib_annule"}
+#define EVT_CALIB_MASK     (EVT_CALIB_DEBUT | EVT_CALIB_FIN | EVT_CALIB_ANNULE)
 
 // ─── Objets FreeRTOS (définis dans main.cpp) ───
 extern SemaphoreHandle_t  dataMutex;

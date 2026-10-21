@@ -130,6 +130,7 @@ class SimLink(BaseLink):
         self._ids = list(esc_ids)
         self._n = 0
         self._active = False
+        self._cal, self._cmin, self._cmax, self._cres = False, 1023, 0, 0
         self._timer = QTimer(self)
         self._timer.setInterval(period_ms)
         self._timer.timeout.connect(self._tick)
@@ -142,7 +143,15 @@ class SimLink(BaseLink):
         self._timer.stop()
 
     def send(self, obj: dict):
-        self._active = obj.get("cmd") == "start"
+        cmd = obj.get("cmd")
+        if cmd in ("start", "stop"):
+            self._active = cmd == "start"
+        elif cmd == "calib":
+            self._cal, self._cmin, self._cmax, self._cres = True, 1023, 0, 0
+        elif cmd == "calib_fin" and self._cal:
+            self._cal, self._cres = False, 1
+        elif cmd == "calib_annule" and self._cal:
+            self._cal, self._cres = False, 4
         self.status.emit("recu: %s" % json.dumps(obj))
 
     def _tick(self):
@@ -168,10 +177,16 @@ class SimLink(BaseLink):
                "yaw": (n * 0.5) % 360 - 180, "vok": 1, "v_kmh": v}
         gps = {"ok": 1, "lat": 45.1200 + n * 1e-6, "lon": -72.2600 + n * 1e-6,
                "alt_ok": 1, "alt": 208.0}
+        raw = int(500 + 200 * math.sin(n / 20.0))
+        if self._cal:
+            self._cmin, self._cmax = min(self._cmin, raw), max(self._cmax, raw)
+        pil = {"raw": raw, "cal": int(self._cal), "cal_res": self._cres,
+               "lmin": 300, "lmax": 700, "cmin": self._cmin if self._cal else 0,
+               "cmax": self._cmax if self._cal else 0}
         self.telemetry.emit({"t": n * self._timer.interval(), "mode": "RUN",
                              "run": "FORWARD", "target": int(erpm),
-                             "ramped": int(erpm), "esc": escs,
-                             "imu": imu, "gps": gps})
+                             "ramped": int(erpm), "esc": escs, "cmode": "ERPM",
+                             "imu": imu, "gps": gps, "pil": pil})
 
 
 def make_link(port: str, baud: int, esc_ids, simulated: bool) -> BaseLink:
