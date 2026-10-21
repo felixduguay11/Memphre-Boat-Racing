@@ -301,7 +301,7 @@
 // Courant moteur (unité interne : 0,1 A). Max VESC = 1478 (147.87 A).
 // Si tu montes « Motor Current Max » dans VESC Tool, monte aussi
 // COURANT_MAX_FORWARD (le VESC plafonne de toute façon au sien).
-#define COURANT_RAMP_STEP      30    // 3 A par cycle (20 ms) = 150 A/s
+#define COURANT_RAMP_STEP      15    // 1.5 A par cycle (20 ms) = 75 A/s
 #define COURANT_MIN_UTILE      50    // 5 A
 #define COURANT_MAX_FORWARD    3000  // 300 A
 #define COURANT_MAX_REVERSE    500   // 50 A
