@@ -40,6 +40,7 @@ struct CanStats {
     uint32_t mal;         // mal formées (standard, ou STATUS de longueur != 8) → jetées
     uint32_t perdues;     // écrasées dans la mailbox avant lecture (overrun)
     uint32_t inconnues;   // commande non décodée ou ID ≠ 10/11 (info)
+    uint32_t params;      // trames de réponse aux lectures de config (esc_params)
     uint32_t tx;          // trames envoyées
     uint32_t tx_echecs;   // envoi refusé (buffer TX plein)
     uint32_t err_bus;     // cycles de 5 ms avec erreur CRC/stuff/forme/bit (ESR1)
@@ -59,7 +60,7 @@ extern float    ESC_temps_us;
 void ESC_InitCAN();
 
 // ─── Envoi des consignes (appelé par Task_Propulsion) ───
-// Unité selon MODE_COMMANDE : eRPM / ‰ de duty / 0,1 A
+// Unité selon MODE_COMMANDE : eRPM / ‰ de duty
 void ESC_EnvoyerConsigne(int32_t cmd_a, int32_t cmd_b);
 
 // ─── Tâche FreeRTOS ───

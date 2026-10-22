@@ -6,6 +6,7 @@ Ajouter une metrique = ajouter une ligne dans TOP_METRICS.
 Ajouter un ESC = ajouter son id dans ESC_IDS.
 """
 
+import os
 from dataclasses import dataclass
 from typing import Callable, List
 
@@ -63,6 +64,16 @@ STOP_PAYLOAD = {"cmd": "stop"}
 
 # Calibration du levier (ecran « Calibrer levier »). Le Teensy n'accepte
 # la calibration qu'en IDLE (switch ON a OFF) et sauve min/max en EEPROM.
+# Parametres des VESC : le Teensy les lit par CAN quand les ESC demarrent
+# et les envoie ({"type":"escconf",...}). L'UI les compare aux fichiers
+# de reference du dossier ESC_PARAMS_DIR (ESC10_mcconf.h, ESC10_appconf.h,
+# ESC11_mcconf.h, ESC11_appconf.h, exportes de VESC Tool) et affiche un
+# pop-up des ecarts. ESCCONF_PAYLOAD redemande les configs deja lues.
+ESC_PARAMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              "esc_params")
+ESCCONF_PAYLOAD = {"cmd": "escconf"}
+ESC_PARAMS_POPUP_S = 20
+
 CALIB_START_PAYLOAD = {"cmd": "calib"}
 CALIB_FIN_PAYLOAD = {"cmd": "calib_fin"}
 CALIB_ANNULE_PAYLOAD = {"cmd": "calib_annule"}

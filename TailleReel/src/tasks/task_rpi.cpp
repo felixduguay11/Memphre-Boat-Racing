@@ -8,7 +8,7 @@
 //  par json_graph_ui.py en « imu.roll », « wd.pil.ok », ...) :
 //    arme, cmode, pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
 //  ⚠ "target" / "ramped" sont dans l'unité de MODE_COMMANDE
-//    (cmode : ERPM = eRPM, DUTY = ‰, COURANT = 0,1 A).
+//    (cmode : ERPM = eRPM, DUTY = ‰).
 //
 //  Les données du watchdog sont dans LA MÊME trame : une trame
 //  séparée ferait afficher « absent de la trame » aux cartes ESC.
@@ -22,6 +22,7 @@
 #include "task_propulsion.h"
 #include "task_esc_data.h"
 #include "task_watchdog.h"
+#include "esc_params.h"
 
 // Mutex défini dans main.cpp
 extern SemaphoreHandle_t dataMutex;
@@ -36,6 +37,7 @@ static float    rpi_temps_us = 0.0f;
 
 static char     json[RPI_JSON_MAX];
 static int      jlen = 0;
+static char     escLine[RPI_ESCCONF_MAX];   // {"type":"escconf",...} (esc_params)
 
 static const char* NOMS_TACHES[NB_TACHES] = {
     "pil", "fsm", "prop", "esc", "xsens", "sonar", "foils", "rpi", "wd"
@@ -159,10 +161,10 @@ static void sendTelemetry()
        s.pil.lev_min, s.pil.lev_max, s.pil.cal_min, s.pil.cal_max);
 
     // --- Qualité du bus CAN ---
-    ap(",\"can\":{\"rx\":%lu,\"mal\":%lu,\"perdu\":%lu,\"inc\":%lu,\"txf\":%lu,"
+    ap(",\"can\":{\"rx\":%lu,\"mal\":%lu,\"perdu\":%lu,\"inc\":%lu,\"par\":%lu,\"txf\":%lu,"
        "\"pct\":%.2f,\"pct_tot\":%.2f,\"ebus\":%lu,\"eack\":%lu,\"rec\":%u,\"tec\":%u,\"flt\":%u}",
        (unsigned long)s.can.rx, (unsigned long)s.can.mal, (unsigned long)s.can.perdues,
-       (unsigned long)s.can.inconnues, (unsigned long)s.can.tx_echecs,
+       (unsigned long)s.can.inconnues, (unsigned long)s.can.params, (unsigned long)s.can.tx_echecs,
        fin(s.can.pct_fenetre), fin(s.can.pct_total),
        (unsigned long)s.can.err_bus, (unsigned long)s.can.err_ack,
        (unsigned)s.can.rec, (unsigned)s.can.tec, (unsigned)s.can.flt);
@@ -215,8 +217,12 @@ static void handlePiCommand(const char* line)
     const char* p = strstr(line, "\"cmd\"");
     if (!p) return;
 
+    // Paramètres des VESC : renvoyer les configs déjà lues
+    if (strstr(p, "escconf")) {
+        EscParams_DemanderRenvoi();
+    }
     // Calibration du levier (testée AVANT start/stop) → Task_Pilote
-    if (strstr(p, "calib_fin")) {
+    else if (strstr(p, "calib_fin")) {
         xEventGroupSetBits(egEtat, EVT_CALIB_FIN);
     }
     else if (strstr(p, "calib_annule")) {
@@ -280,6 +286,10 @@ void Task_RPi(void *ptr)
       lastBeatMs = millis();
       sendHeartbeat();
     }
+
+    // Paramètres des VESC (une config par cycle, streaming ou non)
+    int nEsc = EscParams_ProchaineLigne(escLine, sizeof(escLine));
+    if (nEsc > 0) Serial.write((const uint8_t*)escLine, nEsc);
 
 #if DEBUG_PRINT
     if (millis() - lastPrintMs >= PRINT_MS) {

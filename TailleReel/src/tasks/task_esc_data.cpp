@@ -2,7 +2,7 @@
 //  task_esc_data.cpp
 //  Tâche FreeRTOS — données VESC (CAN3), 200 Hz.
 //  Bus, IDs et décodage repris tels quels de Real_V1.
-//  Ajouts : consigne eRPM / duty / courant (MODE_COMMANDE) et
+//  Ajouts : consigne eRPM / duty (MODE_COMMANDE) et
 //  statistiques de qualité du bus (trames rejetées, erreurs).
 // =====================================================
 
@@ -13,6 +13,7 @@
 
 #include "task_esc_data.h"
 #include "task_watchdog.h"
+#include "esc_params.h"
 
 // CAN3 sur Teensy 4.1 = pin 30 (CRX3) / pin 31 (CTX3)
 static FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> rawCan1;
@@ -24,10 +25,12 @@ static FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> rawCan1;
 //   - mal formée : trame standard, ou STATUS de longueur != 8
 //                  → JETÉE (le décodeur lirait des octets faux)
 //   - inconnue   : commande non décodée ou ID ≠ 10/11 (transmise)
+//   - params     : réponse à une lecture de config (adressée au
+//                  Teensy) → consommée par esc_params, pas décodée
 // =====================================================
 // Écrits sous canMutex (lecture : cette tâche, écriture : Propulsion) ;
 // lus par cette tâche (lecture 32 bits atomique).
-static uint32_t cRx = 0, cMal = 0, cPerdues = 0, cInconnues = 0;
+static uint32_t cRx = 0, cMal = 0, cPerdues = 0, cInconnues = 0, cParams = 0;
 static uint32_t cTx = 0, cTxEchecs = 0;
 
 static bool estStatus(uint8_t cmd)
@@ -47,6 +50,7 @@ public:
             if (m.flags.overrun) cPerdues++;          // au moins une trame écrasée
 
             if (!m.flags.extended) { cMal++; continue; }
+            if (EscParams_TraiterTrame(m.id, m.buf, m.len)) { cParams++; continue; }
             uint8_t id  = (uint8_t)(m.id & 0xFF);
             uint8_t cmd = (uint8_t)((m.id >> 8) & 0xFF);
             if (estStatus(cmd)) {
@@ -85,6 +89,7 @@ float    ESC_temps_us      = 0.0f;
 void ESC_InitCAN()
 {
     canMutex = xSemaphoreCreateMutex();
+    EscParams_Init();
     rawCan1.begin();
     rawCan1.setBaudRate(BAUD_CAN);
 
@@ -109,7 +114,7 @@ void ESC_InitCAN()
 }
 
 // Envoi d'une consigne à un VESC selon MODE_COMMANDE.
-// v : eRPM / ‰ de duty / 0,1 A
+// v : eRPM / ‰ de duty. (Contrôle en courant retiré le 22/10.)
 static void envoyer(uint8_t id, int32_t v)
 {
 #if MODE_COMMANDE == MODE_ERPM
@@ -117,8 +122,8 @@ static void envoyer(uint8_t id, int32_t v)
 #elif MODE_COMMANDE == MODE_DUTY
     if (v == 0) vesc.setCurrent(id, 0.0f);          // relâche le moteur (roue libre)
     else        vesc.setDuty(id, (float)v / 1000.0f);
-#else // MODE_COURANT
-    vesc.setCurrent(id, (float)v / 10.0f);          // 0 = moteur relâché
+#else
+    #error "MODE_COMMANDE : MODE_ERPM ou MODE_DUTY seulement"
 #endif
 }
 
@@ -203,6 +208,7 @@ void Task_ESC_Data(void *ptr)
         cs.mal       = cMal;
         cs.perdues   = cPerdues;
         cs.inconnues = cInconnues;
+        cs.params    = cParams;
         cs.tx        = cTx;
         cs.tx_echecs = cTxEchecs;
         cs.err_bus   = errBus;
@@ -226,6 +232,23 @@ void Task_ESC_Data(void *ptr)
         }
         cs.pct_fenetre = pctFen;
 
+        // Lecture des paramètres des VESC (une requête au plus par cycle)
+        bool viv[NB_VESC];
+        for (int k = 0; k < NB_VESC; k++) viv[k] = d[k].vivant;
+        uint32_t reqId;  uint8_t reqData[8];  uint8_t reqLen = 0;
+        if (EscParams_Cycle(millis(), viv, reqId, reqData, reqLen))
+        {
+            CAN_message_t req;
+            req.id = reqId;
+            req.flags.extended = 1;
+            req.len = reqLen;
+            memcpy(req.buf, reqData, reqLen);
+            if (xSemaphoreTake(canMutex, portMAX_DELAY)) {
+                adapterCan1.write(req);
+                xSemaphoreGive(canMutex);
+            }
+        }
+
         float duree_us = (float)(micros() - t_debut);
 
         if (xSemaphoreTake(dataMutex, portMAX_DELAY))
@@ -237,6 +260,9 @@ void Task_ESC_Data(void *ptr)
         }
 
         wd_vivant(T_ESC);
-        vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(PERIODE_ESC_MS));
+        // Pendant la réception d'une config (~76 trames en ~40 ms),
+        // on vide les 16 mailboxes toutes les 1 ms au lieu de 5 ms.
+        vTaskDelayUntil(&lastWakeTime,
+                        pdMS_TO_TICKS(EscParams_TransfertEnCours() ? 1 : PERIODE_ESC_MS));
     }
 }

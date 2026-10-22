@@ -4,7 +4,7 @@
 import sys
 import argparse
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication, QStackedWidget
 
@@ -14,6 +14,8 @@ from .link import make_link
 from .screens import StartScreen, TelemetryScreen, XsensScreen, FlashScreen, CalibScreen
 from .flasher import TeensyFlasher
 from .logger import TelemetryLogger
+from .esc_params import EscParamsChecker
+from .esc_popup import EscParamsPopup
 
 
 class MainWindow(QStackedWidget):
@@ -70,6 +72,16 @@ class MainWindow(QStackedWidget):
         self.setWindowTitle(title)
         
         self.logger = TelemetryLogger(cfg.LOG_DIR)
+
+        # Parametres des VESC : verification a chaque lecture du Teensy
+        self.esc_checker = EscParamsChecker(cfg.ESC_PARAMS_DIR, cfg.LOG_DIR)
+        self.esc_popup = EscParamsPopup(self)
+        self.currentChanged.connect(self._keep_popup_on_top)
+        # Si le Teensy a lu les configs avant le demarrage de l'UI : on les
+        # redemande (le port serie s'ouvre dans les premieres secondes).
+        for ms in (3000, 8000):
+            QTimer.singleShot(ms, self._ask_escconf)
+
         self.apply_theme(theme.load_theme())
 
     def apply_theme(self, name: str):
@@ -83,6 +95,9 @@ class MainWindow(QStackedWidget):
         theme.save_theme(name)
 
     def _on_telemetry(self, d: dict):
+        if d.get("type") == "escconf":
+            self._on_escconf(d)
+            return
         # Toutes les pages sont a jour : changer d'onglet n'affiche
         # jamais une valeur perimee. Le log tourne quel que soit l'onglet.
         if self._streaming:
@@ -91,6 +106,26 @@ class MainWindow(QStackedWidget):
             self.logger.write(d)
         elif self.currentWidget() is self.calib_screen:
             self.calib_screen.update_data(d)
+
+    # ------------------------------------------------------------ parametres ESC
+    def _keep_popup_on_top(self, _index):
+        if self.esc_popup.isVisible():
+            self.esc_popup.raise_()
+
+    def _ask_escconf(self):
+        self.link.send(cfg.ESCCONF_PAYLOAD)
+
+    def _on_escconf(self, d: dict):
+        res = self.esc_checker.traiter(d)
+        if res is None:
+            return                          # simple renvoi d'une lecture deja vue
+        if res["erreur"]:
+            print("[esc_params] ESC %d %s : %s" % (res["id"], res["nom"], res["erreur"]))
+        else:
+            print("[esc_params] ESC %d %s : %d parametre(s) different(s)"
+                  % (res["id"], res["nom"], len(res["diffs"])))
+        if res["erreur"] or res["diffs"]:
+            self.esc_popup.ajouter(res)
 
     def _show_page(self, key: str):
         self.setCurrentWidget(self._pages[key])
@@ -104,6 +139,7 @@ class MainWindow(QStackedWidget):
 
     def _on_start(self, payload: dict):
         self.link.send(payload)
+        self._ask_escconf()
         self._streaming = True
         self.setCurrentWidget(self.telemetry_screen)
         self.logger.start()

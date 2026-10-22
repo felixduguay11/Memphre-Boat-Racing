@@ -1,7 +1,7 @@
 // =====================================================
 //  task_propulsion.cpp
 //  Tâche FreeRTOS — propulsion, 50 Hz.
-//  Consigne en eRPM, duty ou courant selon MODE_COMMANDE (config.h).
+//  Consigne en eRPM ou duty selon MODE_COMMANDE (config.h).
 //  Rampe et envoi repris de Real_V1 (fonction StateMachine(target)).
 // =====================================================
 
@@ -24,7 +24,7 @@ static void AppliquerConsigne(int target)
 {
     if (target == 0) {
         // Arret : coupure nette. ERPM : une consigne sous le Minimum ERPM
-        // du VESC laisse le moteur en roue libre. DUTY / COURANT : courant 0
+        // du VESC laisse le moteur en roue libre. DUTY : courant 0
         // envoyé = moteur relâché (voir ESC_EnvoyerConsigne).
         rampedTarget = 0;
     } else {
