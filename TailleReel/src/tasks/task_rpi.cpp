@@ -8,7 +8,7 @@
 //  par json_graph_ui.py en « imu.roll », « wd.pil.ok », ...) :
 //    arme, cmode, pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
 //  ⚠ "target" / "ramped" sont dans l'unité de MODE_COMMANDE
-//    (cmode : ERPM = eRPM, DUTY = ‰, COURANT = 0,1 A).
+//    (cmode : ERPM = eRPM, DUTY = ‰).
 //
 //  Les données du watchdog sont dans LA MÊME trame : une trame
 //  séparée ferait afficher « absent de la trame » aux cartes ESC.

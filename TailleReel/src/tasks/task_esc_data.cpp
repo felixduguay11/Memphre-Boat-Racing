@@ -2,7 +2,7 @@
 //  task_esc_data.cpp
 //  Tâche FreeRTOS — données VESC (CAN3), 200 Hz.
 //  Bus, IDs et décodage repris tels quels de Real_V1.
-//  Ajouts : consigne eRPM / duty / courant (MODE_COMMANDE) et
+//  Ajouts : consigne eRPM / duty (MODE_COMMANDE) et
 //  statistiques de qualité du bus (trames rejetées, erreurs).
 // =====================================================
 
@@ -114,7 +114,7 @@ void ESC_InitCAN()
 }
 
 // Envoi d'une consigne à un VESC selon MODE_COMMANDE.
-// v : eRPM / ‰ de duty / 0,1 A
+// v : eRPM / ‰ de duty. (Contrôle en courant retiré le 22/10.)
 static void envoyer(uint8_t id, int32_t v)
 {
 #if MODE_COMMANDE == MODE_ERPM
@@ -122,8 +122,8 @@ static void envoyer(uint8_t id, int32_t v)
 #elif MODE_COMMANDE == MODE_DUTY
     if (v == 0) vesc.setCurrent(id, 0.0f);          // relâche le moteur (roue libre)
     else        vesc.setDuty(id, (float)v / 1000.0f);
-#else // MODE_COURANT
-    vesc.setCurrent(id, (float)v / 10.0f);          // 0 = moteur relâché
+#else
+    #error "MODE_COMMANDE : MODE_ERPM ou MODE_DUTY seulement"
 #endif
 }
 

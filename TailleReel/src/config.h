@@ -271,23 +271,21 @@
 // MODE_ERPM    : boucle de vitesse du VESC (ancien comportement)
 // MODE_DUTY    : levier → duty cycle (tension). Pas de boucle de
 //                vitesse ; vitesse bornée hors de l'eau.
-// MODE_COURANT : levier → courant moteur (couple). Plus doux au
-//                départ. ⚠ hélice hors de l'eau = le moteur monte
-//                jusqu'au duty max : limiter « Max ERPM » dans VESC
-//                Tool (voir recommandations mcconf).
+// Le contrôle en courant a été RETIRÉ le 22/10 : hélices hors de
+// l'eau, une consigne de couple fait monter le moteur au duty max
+// en moins d'une seconde (session 17 : hélices détruites).
 // Dans tous les modes, le VESC applique ses propres limites
 // (mcconf : Motor Current Max 147.87 A, Max Duty 0.95,
 // Battery Current Max 250 A). Le plafond vers 12 km/h vient de
 // « Motor Current Max » : ça se change dans VESC Tool, pas ici.
 #define MODE_ERPM           0
 #define MODE_DUTY           1
-#define MODE_COURANT        2
-#define MODE_COMMANDE       MODE_COURANT
+#define MODE_COMMANDE       MODE_ERPM
 
 // eRPM (unité interne : eRPM)
 #define RAMP_STEP           80       // changement max d'eRPM par cycle (20 ms)
 #define ERPM_MIN_UTILE      1800
-#define ERPM_MAX_FORWARD    24000
+#define ERPM_MAX_FORWARD    20000
 #define ERPM_MAX_REVERSE    4000     // magnitude ; le signe est mis dans le code
 
 // Duty (unité interne : ‰, 1000 = 100 %). Repère : 1800 eRPM ≈ 5 %,
@@ -297,15 +295,6 @@
 #define DUTY_MAX_FORWARD    950
 #define DUTY_MAX_REVERSE    110
 #define DUTY_MAX_SURCHAUFFE 500
-
-// Courant moteur (unité interne : 0,1 A). Max VESC = 1478 (147.87 A).
-// Si tu montes « Motor Current Max » dans VESC Tool, monte aussi
-// COURANT_MAX_FORWARD (le VESC plafonne de toute façon au sien).
-#define COURANT_RAMP_STEP      15    // 1.5 A par cycle (20 ms) = 75 A/s
-#define COURANT_MIN_UTILE      50    // 5 A
-#define COURANT_MAX_FORWARD    3000  // 300 A
-#define COURANT_MAX_REVERSE    500   // 50 A
-#define COURANT_MAX_SURCHAUFFE 800   // 80 A
 
 #define PROP_CMD_TIMEOUT_MS 200      // commande FSM plus vieille → consigne 0
 
@@ -334,15 +323,8 @@
   #define CMD_MAX_FORWARD    DUTY_MAX_FORWARD
   #define CMD_MAX_REVERSE    DUTY_MAX_REVERSE
   #define CMD_MAX_SURCHAUFFE DUTY_MAX_SURCHAUFFE
-#elif MODE_COMMANDE == MODE_COURANT
-  #define CMD_NOM            "COURANT"
-  #define CMD_RAMP_STEP      COURANT_RAMP_STEP
-  #define CMD_MIN_UTILE      COURANT_MIN_UTILE
-  #define CMD_MAX_FORWARD    COURANT_MAX_FORWARD
-  #define CMD_MAX_REVERSE    COURANT_MAX_REVERSE
-  #define CMD_MAX_SURCHAUFFE COURANT_MAX_SURCHAUFFE
 #else
-  #error "MODE_COMMANDE invalide"
+  #error "MODE_COMMANDE invalide : MODE_ERPM ou MODE_DUTY seulement (contrôle en courant retiré)"
 #endif
 //------------------------------------//
 

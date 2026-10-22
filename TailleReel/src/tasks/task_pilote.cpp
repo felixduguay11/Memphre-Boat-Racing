@@ -47,7 +47,7 @@ static int LireLevier(int raw)
 
 // Sous CMD_MIN_UTILE le moteur ne tourne pas proprement : dès que
 // le levier sort du deadband on saute à CMD_MIN_UTILE, puis linéaire.
-// (unité selon MODE_COMMANDE : eRPM / ‰ duty / 0,1 A)
+// (unité selon MODE_COMMANDE : eRPM / ‰ duty)
 static int CreateTargetForward(int lev)
 {
     if (lev == 0) return 0;                 // repos : moteur arrêté

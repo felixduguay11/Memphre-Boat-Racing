@@ -60,7 +60,7 @@ extern float    ESC_temps_us;
 void ESC_InitCAN();
 
 // ─── Envoi des consignes (appelé par Task_Propulsion) ───
-// Unité selon MODE_COMMANDE : eRPM / ‰ de duty / 0,1 A
+// Unité selon MODE_COMMANDE : eRPM / ‰ de duty
 void ESC_EnvoyerConsigne(int32_t cmd_a, int32_t cmd_b);
 
 // ─── Tâche FreeRTOS ───

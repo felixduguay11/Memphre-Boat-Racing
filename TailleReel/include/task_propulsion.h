@@ -6,7 +6,7 @@
 //
 //  Lit la commande de la machine d'état (qCmd, xQueuePeek),
 //  applique les sécurités puis la rampe de Real_V1 et envoie
-//  la consigne aux deux VESC (eRPM, duty ou courant : MODE_COMMANDE).
+//  la consigne aux deux VESC (eRPM ou duty : MODE_COMMANDE).
 //
 //  Sécurités (indépendantes de la machine d'état) :
 //    - commande plus vieille que PROP_CMD_TIMEOUT_MS → 0

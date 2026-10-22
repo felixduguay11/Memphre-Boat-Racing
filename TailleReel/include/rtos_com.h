@@ -38,7 +38,7 @@ struct PiloteData {
     int  levier;         // levier nettoyé 0..1023 (0 = repos / deadband)
     int  target_fwd;     // consigne si marche avant  (0 ou CMD_MIN_UTILE..CMD_MAX_FORWARD)
     int  target_rev;     // consigne si marche arrière (0 ou -CMD_MIN_UTILE..-CMD_MAX_REVERSE)
-                         // unité selon MODE_COMMANDE : eRPM / ‰ duty / 0,1 A
+                         // unité selon MODE_COMMANDE : eRPM / ‰ duty
     // ── Ajouts (en fin de struct : les initialisations courtes restent valides) ──
     bool    au_neutre;   // levier sous le seuil d'armement (relatif au min calibré)
     bool    dcdc;        // sortie DC_DC_3V3 active (OFF 3 s après I_But_Start ON)
