@@ -17,6 +17,7 @@ pyserial manque : on veut savoir que le lien est mort).
 
 import json
 import math
+import os
 import time
 
 from PySide6.QtCore import QObject, QThread, Signal, QTimer, QMutex
@@ -138,6 +139,8 @@ class SimLink(BaseLink):
     def start_link(self):
         self._timer.start()
         self.status.emit("mode simulation")
+        # Comme le Teensy : les configs des VESC arrivent apres le demarrage
+        QTimer.singleShot(1500, self._emit_escconf)
 
     def stop_link(self):
         self._timer.stop()
@@ -152,7 +155,31 @@ class SimLink(BaseLink):
             self._cal, self._cres = False, 1
         elif cmd == "calib_annule" and self._cal:
             self._cal, self._cres = False, 4
+        elif cmd == "escconf":
+            QTimer.singleShot(100, self._emit_escconf)
         self.status.emit("recu: %s" % json.dumps(obj))
+
+    def _emit_escconf(self):
+        """Configs simulees a partir des fichiers de reference, avec
+        quelques ecarts pour voir le pop-up."""
+        from . import config as cfg
+        from .esc_params import encode, lire_reference, KINDS, _nombre
+        ecarts = {(10, "mc"): {"MCCONF_L_CURRENT_MAX": 147.87, "MCCONF_L_RPM_MAX": 30000,
+                               "MCCONF_FOC_OFFSETS_CURRENT_0": 2050.5},   # offset : ignore
+                  (11, "app"): {"APPCONF_TIMEOUT_MSEC": 500}}
+        for esc_id in self._ids:
+            for kind in KINDS:
+                msg = {"type": "escconf", "id": esc_id, "k": kind, "t": 1500}
+                try:
+                    path = os.path.join(cfg.ESC_PARAMS_DIR, KINDS[kind]["fichier"] % esc_id)
+                    vals = {n: _nombre(v) for n, (v, _) in lire_reference(path).items()
+                            if _nombre(v) is not None}
+                    vals.update(ecarts.get((esc_id, kind), {}))
+                    raw = encode(kind, vals)
+                    msg.update(ok=1, len=len(raw), hex=raw.hex())
+                except OSError:
+                    msg.update(ok=0, err="timeout")
+                self.telemetry.emit(msg)
 
     def _tick(self):
         if not self._active:

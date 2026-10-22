@@ -91,6 +91,16 @@ QPlainTextEdit#flashLog {{ background:{card}; color:{text}; border:none; border-
 QLabel#flashOk   {{ font-size:20px; font-weight:600; color:{ok_fg}; }}
 QLabel#flashKo   {{ font-size:20px; font-weight:600; color:{ko_fg}; }}
 QLabel#flashBusy {{ font-size:20px; color:{accent_fg}; }}
+QFrame#popup     {{ background:{card}; border:3px solid {danger}; border-radius:14px; }}
+QFrame#popup QLabel {{ background:transparent; }}
+QLabel#popupTitle {{ font-size:24px; font-weight:600; color:{danger_fg}; }}
+QLabel#popupTimer {{ font-size:18px; color:{muted}; }}
+QPushButton#popupClose {{ font-size:28px; font-weight:600; border-radius:10px; border:1px solid {line};
+                          background:transparent; color:{text}; }}
+QTableWidget#popupTable {{ background:{card}; color:{text}; border:none; font-size:17px;
+                           gridline-color:{line}; }}
+QTableWidget#popupTable QHeaderView::section {{ background:{card}; color:{muted}; font-size:16px;
+                           border:none; border-bottom:1px solid {line}; padding:4px 8px; }}
 """
 
 
