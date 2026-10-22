@@ -209,8 +209,8 @@
 // Relevé au banc : repos = 230, butée = 730.
 // Valeurs PAR DÉFAUT : remplacées par la calibration sauvegardée
 // en EEPROM si elle existe (voir CALIBRATION DU LEVIER).
-#define LEVIER_RAW_MIN      300    // valeur au repos (levier relâché)
-#define LEVIER_RAW_MAX      700    // valeur à fond
+#define LEVIER_RAW_MIN      150    // valeur au repos (levier relâché)
+#define LEVIER_RAW_MAX      610    // valeur à fond
 #define LEVIER_DEADBAND     30     // sous ce delta au-dessus du MIN -> 0
 
 // Calibration du levier (Task_Pilote), lancée depuis l'UI du Pi
@@ -354,6 +354,22 @@
 //------------------------------------//
 
 
+//------- PARAMÈTRES DES VESC --------//
+// Lecture de la config de chaque VESC (mcconf + appconf) par CAN,
+// une fois chaque fois qu'un VESC se met à parler (démarrage des
+// ESC). Les octets bruts sont relayés au Pi, qui les décode
+// (firmware VESC 6.06) et les compare aux fichiers de référence
+// UI/esc_params/ESCxx_mcconf.h et ESCxx_appconf.h.
+#define ESC_PARAMS_ACTIF      1
+#define TEENSY_CAN_ID         2      // ID du Teensy sur le bus (les VESC répondent à cet ID)
+#define ESC_PARAMS_DELAI_MS   1000   // attente après la 1re trame d'un VESC (fin de son boot)
+#define ESC_PARAMS_TIMEOUT_MS 500    // réponse complète attendue en moins de ...
+#define ESC_PARAMS_ESSAIS     3      // essais par config avant d'abandonner
+#define ESC_PARAMS_PAUSE_MS   200    // entre deux essais
+#define ESC_PARAMS_MAX_OCTETS 600    // config la plus longue (mcconf 6.06 = 484 octets)
+//------------------------------------//
+
+
 //------------ FILTRE GPS ------------//
 // Rejet des vitesses / positions aberrantes de l'Xsens (paquets
 // corrompus). Après GPS_REJETS_RESYNC rejets consécutifs, la
@@ -397,6 +413,7 @@
 #define HB_MS               500   // battement de cœur hors streaming
 #define PI_LINE_MAX         96
 #define RPI_JSON_MAX        2048
+#define RPI_ESCCONF_MAX     (2 * ESC_PARAMS_MAX_OCTETS + 128)   // ligne {"type":"escconf",...}
 #define DEBUG_PRINT         0     // texte lisible en plus du JSON (app Pi fermée)
 #define DEBUG_LEVIER        0     // 1 = imprime le raw ADC pour calibrer
 #define PRINT_MS            1000
