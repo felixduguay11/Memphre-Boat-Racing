@@ -47,8 +47,8 @@ BAUD = 115200               # ignore en USB CDC, sans effet
 SCREEN_W, SCREEN_H = 800, 480
 
 # ------------------------------------------------------------ moteurs
-# Ordre = ordre d'affichage, de gauche a droite (ESC 11 a gauche).
-ESC_IDS = [11, 10]
+# Ordre = ordre d'affichage, de gauche a droite (ESC 10 a gauche).
+ESC_IDS = [10, 11]
 
 # Nombre de PAIRES de poles du moteur (pas le nombre de poles !).
 # Sert a convertir l'eRPM du VESC en RPM mecanique : RPM = eRPM / paires.
