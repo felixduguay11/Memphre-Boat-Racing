@@ -106,7 +106,7 @@ void Task_StateMachine(void *ptr)
             // Armement : on refuse toute consigne tant que le levier
             // n'a pas été vu au neutre au moins une fois.
             if (ARMEMENT_REQUIS && !levierArme) {
-                if (pil.au_neutre) levierArme = true;   // seuil relatif au min calibré
+                if (pil.au_neutre) levierArme = true;   // raw <= min calibré + LEVIER_ARME_MARGE
                 currentRunMode = RunMode::NEUTRAL;
                 target         = 0;
             }

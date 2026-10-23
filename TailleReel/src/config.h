@@ -206,11 +206,11 @@
 #define PRECHARGE_MS        3000
 
 // Levier : bornes réelles MESURÉES de l'ADC (10 bits).
-// Relevé au banc : repos = 230, butée = 730.
+// Nouveau potentiomètre (23/10) : repos ≈ 410, butée ≈ 840.
 // Valeurs PAR DÉFAUT : remplacées par la calibration sauvegardée
 // en EEPROM si elle existe (voir CALIBRATION DU LEVIER).
-#define LEVIER_RAW_MIN      150    // valeur au repos (levier relâché)
-#define LEVIER_RAW_MAX      610    // valeur à fond
+#define LEVIER_RAW_MIN      410    // valeur au repos (levier relâché)
+#define LEVIER_RAW_MAX      840    // valeur à fond
 #define LEVIER_DEADBAND     30     // sous ce delta au-dessus du MIN -> 0
 
 // Calibration du levier (Task_Pilote), lancée depuis l'UI du Pi
@@ -247,9 +247,11 @@
 // ARMEMENT_REQUIS  1 = protection active (recommandé sur l'eau)
 //                  0 = désactivée, le levier répond tout de suite
 #define ARMEMENT_REQUIS     1
-#define LEVIER_RAW_ARME     330    // raw sous lequel le levier est « au neutre » (MIN + DEADBAND)
-// NB : appliqué en RELATIF au min calibré :
-//      neutre si raw <= min + (LEVIER_RAW_ARME - LEVIER_RAW_MIN)
+// Levier « au neutre » (armement possible) si raw <= min calibré
+// + LEVIER_ARME_MARGE. Toujours relatif au min calibré, donc valable
+// quel que soit le potentiomètre. (LEVIER_RAW_ARME retiré le 23/10 :
+// sa marge de 180 permettait d'armer avec ~40 % de levier.)
+#define LEVIER_ARME_MARGE   10
 //------------------------------------//
 
 
@@ -264,8 +266,8 @@
 // Hélices contrarotatives : les deux doivent tourner en sens
 // OPPOSÉS. Si le bateau recule quand le levier demande l'avant,
 // inverse les DEUX lignes. Jamais la même valeur.
-#define VESC_A_INVERSE      1
-#define VESC_B_INVERSE      1
+#define VESC_A_INVERSE      0
+#define VESC_B_INVERSE      0
 
 // ── Mode de commande des VESC ──
 // MODE_ERPM    : boucle de vitesse du VESC (ancien comportement)
