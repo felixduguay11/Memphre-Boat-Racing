@@ -16,7 +16,7 @@
 #define MCCONF_SENSOR_MODE 0
 
 // Motor Current Max
-#define MCCONF_L_CURRENT_MAX 300
+#define MCCONF_L_CURRENT_MAX 280
 
 // Motor Current Max Brake
 #define MCCONF_L_CURRENT_MIN -300
