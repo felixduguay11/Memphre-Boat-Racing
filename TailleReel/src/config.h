@@ -287,7 +287,7 @@
 // eRPM (unité interne : eRPM)
 #define RAMP_STEP           80       // changement max d'eRPM par cycle (20 ms)
 #define ERPM_MIN_UTILE      400
-#define ERPM_MAX_FORWARD    32000
+#define ERPM_MAX_FORWARD    16000
 #define ERPM_MAX_REVERSE    4000     // magnitude ; le signe est mis dans le code
 
 // Duty (unité interne : ‰, 1000 = 100 %). Repère : 1800 eRPM ≈ 5 %,
