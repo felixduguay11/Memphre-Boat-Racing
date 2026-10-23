@@ -206,7 +206,7 @@
 #define PRECHARGE_MS        3000
 
 // Levier : bornes réelles MESURÉES de l'ADC (10 bits).
-// Relevé au banc : repos = 230, butée = 730.
+// Nouveau potentiomètre (23/10) : repos ≈ 410, butée ≈ 840.
 // Valeurs PAR DÉFAUT : remplacées par la calibration sauvegardée
 // en EEPROM si elle existe (voir CALIBRATION DU LEVIER).
 #define LEVIER_RAW_MIN      410    // valeur au repos (levier relâché)
@@ -247,9 +247,11 @@
 // ARMEMENT_REQUIS  1 = protection active (recommandé sur l'eau)
 //                  0 = désactivée, le levier répond tout de suite
 #define ARMEMENT_REQUIS     1
-#define LEVIER_RAW_ARME     330    // raw sous lequel le levier est « au neutre » (MIN + DEADBAND)
-// NB : appliqué en RELATIF au min calibré :
-//      neutre si raw <= min + (LEVIER_RAW_ARME - LEVIER_RAW_MIN)
+// Levier « au neutre » (armement possible) si raw <= min calibré
+// + LEVIER_ARME_MARGE. Toujours relatif au min calibré, donc valable
+// quel que soit le potentiomètre. (LEVIER_RAW_ARME retiré le 23/10 :
+// sa marge de 180 permettait d'armer avec ~40 % de levier.)
+#define LEVIER_ARME_MARGE   10
 //------------------------------------//
 
 

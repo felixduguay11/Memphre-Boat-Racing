@@ -277,7 +277,7 @@ void Task_Pilote(void *ptr)
             p.levier     = LireLevier(p.levier_raw);
             p.target_fwd = CreateTargetForward(p.levier);
             p.target_rev = CreateTargetReverse(p.levier);
-            p.au_neutre  = (p.levier_raw <= levMin + (LEVIER_RAW_ARME - LEVIER_RAW_MIN));
+            p.au_neutre  = (p.levier_raw <= levMin + LEVIER_ARME_MARGE);
         }
 
         // Envoi à la machine d'état. File pleine = FSM figée : on

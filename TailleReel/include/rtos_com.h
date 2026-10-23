@@ -40,7 +40,7 @@ struct PiloteData {
     int  target_rev;     // consigne si marche arrière (0 ou -CMD_MIN_UTILE..-CMD_MAX_REVERSE)
                          // unité selon MODE_COMMANDE : eRPM / ‰ duty
     // ── Ajouts (en fin de struct : les initialisations courtes restent valides) ──
-    bool    au_neutre;   // levier sous le seuil d'armement (relatif au min calibré)
+    bool    au_neutre;   // levier <= min calibré + LEVIER_ARME_MARGE (armement)
     bool    dcdc;        // sortie DC_DC_3V3 active (OFF 3 s après I_But_Start ON)
     uint8_t sw_brut;     // lecture brute des switchs avant anti-rebond (bits : 0 ON, 1 F/R, 2 CTL, 3 START)
     uint8_t calib;       // 1 = calibration en cours (UI), 2 = calibration auto (commande secrète)
