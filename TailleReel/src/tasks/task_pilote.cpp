@@ -34,15 +34,17 @@ static long map_long(long x, long in_min, long in_max, long out_min, long out_ma
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-// Levier nettoyé : 0..1023 recalé sur les bornes réelles,
-// et 0 franc tant qu'on est dans le deadband du repos.
+// Levier nettoyé : 0 franc tant qu'on est dans le deadband du repos,
+// puis 1..1023 recalé du BORD du deadband jusqu'au max calibré
+// (sinon la consigne sautait à ~7 % de la plage en sortant du
+// deadband : 0 → 2800 eRPM, corrigé le 23/10).
 // Une entrée flottante (pin non branchée) reste bruyante : c'est
 // l'armement (machine d'état), pas le deadband, qui protège de ce cas.
 static int LireLevier(int raw)
 {
     if (raw <= levMin + LEVIER_DEADBAND) return 0;
     if (raw >= levMax) return 1023;
-    return (int)map_long(raw, levMin, levMax, 0, 1023);
+    return (int)map_long(raw, levMin + LEVIER_DEADBAND, levMax, 1, 1023);
 }
 
 // Sous CMD_MIN_UTILE le moteur ne tourne pas proprement : dès que
