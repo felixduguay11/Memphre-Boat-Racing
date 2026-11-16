@@ -132,6 +132,7 @@ class SimLink(BaseLink):
         self._n = 0
         self._active = False
         self._cal, self._cmin, self._cmax, self._cres = False, 1023, 0, 0
+        self._cap = False                 # plafond batterie basse (comme le Teensy)
         self._timer = QTimer(self)
         self._timer.setInterval(period_ms)
         self._timer.timeout.connect(self._tick)
@@ -157,6 +158,8 @@ class SimLink(BaseLink):
             self._cal, self._cres = False, 4
         elif cmd == "escconf":
             QTimer.singleShot(100, self._emit_escconf)
+        elif cmd in ("batt_basse", "batt_ok"):
+            self._cap = cmd == "batt_basse"
         self.status.emit("recu: %s" % json.dumps(obj))
 
     def _emit_escconf(self):
@@ -187,6 +190,8 @@ class SimLink(BaseLink):
         self._n += 1
         n = self._n
         erpm = 3200 + math.sin(n / 25.0) * 450
+        if self._cap:
+            erpm = min(erpm, 16000 * 0.20)      # ERPM_MAX_FORWARD * BATT_BASSE_PCT
         vin = 71.0 + math.sin(n / 40.0) * 1.4
         iin = 18.0 + math.sin(n / 15.0) * 5.0
         escs = []
@@ -213,6 +218,7 @@ class SimLink(BaseLink):
         self.telemetry.emit({"t": n * self._timer.interval(), "mode": "RUN",
                              "run": "FORWARD", "target": int(erpm),
                              "ramped": int(erpm), "esc": escs, "cmode": "ERPM",
+                             "bat_cap": int(self._cap),
                              "imu": imu, "gps": gps, "pil": pil})
 
 

@@ -2,7 +2,8 @@
 """widgets.py — briques reutilisables, sans logique metier."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy
+from PySide6.QtWidgets import (QFrame, QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy,
+                               QProgressBar)
 
 CENTER = Qt.AlignmentFlag.AlignCenter
 BOTTOM = Qt.AlignmentFlag.AlignBottom
@@ -164,3 +165,97 @@ class Badge(QLabel):
         self.setObjectName("pill" if ok else "pillKo")
         self.style().unpolish(self)
         self.style().polish(self)
+
+
+class MultiCard(QFrame):
+    """Une seule carte, plusieurs valeurs cote a cote (ex. V | A | W).
+    Chaque colonne : petite etiquette, puis valeur + unite."""
+
+    def __init__(self, metrics):
+        super().__init__()
+        self.setObjectName("card")
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 6, 14, 6)
+        lay.setSpacing(6)
+        self._values = []
+        for n, m in enumerate(metrics):
+            if n:
+                lay.addStretch(1)
+            col = QVBoxLayout()
+            col.setSpacing(0)
+            lab = QLabel(m.label);  lab.setObjectName("cardLabel")
+            val = QLabel("--");     val.setObjectName("multiValue")
+            unit = QLabel(m.unit);  unit.setObjectName("multiUnit")
+            row = QHBoxLayout()
+            row.setSpacing(4)
+            row.addWidget(val, 0, BOTTOM)
+            row.addWidget(unit, 0, BOTTOM)
+            col.addWidget(lab)
+            col.addLayout(row)
+            lay.addLayout(col)
+            self._values.append(val)
+
+    def set_values(self, texts):
+        for lab, t in zip(self._values, texts):
+            lab.setText(t)
+
+
+class ChargeCard(QFrame):
+    """Charge batterie : pourcentage + barre qui se vide.
+    Vert au-dessus de `warn`, jaune + texte d'alerte rouge a `warn` et
+    moins, rouge + autre texte a `stop` et moins."""
+
+    def __init__(self, label: str, warn: int, stop: int,
+                 warn_text: str = "Attention", stop_text: str = "Vitesse limitee"):
+        super().__init__()
+        self.setObjectName("card")
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._warn, self._stop = warn, stop
+        self._warn_text, self._stop_text = warn_text, stop_text
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 6, 14, 10)
+        lay.setSpacing(4)
+
+        head = QHBoxLayout()
+        self._label = QLabel(label);  self._label.setObjectName("cardLabel")
+        self._alert = QLabel("");     self._alert.setObjectName("chargeAlert")
+        self._value = QLabel("--");   self._value.setObjectName("chargeValue")
+        self._unit = QLabel("%");     self._unit.setObjectName("cardUnit")
+        self._alert.setAlignment(CENTER)
+        head.addWidget(self._label, 0, Qt.AlignmentFlag.AlignTop)
+        head.addWidget(self._alert, 1, Qt.AlignmentFlag.AlignVCenter)
+        head.addWidget(self._value, 0, BOTTOM)
+        head.addWidget(self._unit, 0, BOTTOM)
+        lay.addLayout(head)
+
+        self._bar = QProgressBar()
+        self._bar.setRange(0, 100)
+        self._bar.setTextVisible(False)
+        self._bar.setFixedHeight(22)
+        lay.addWidget(self._bar)
+        self.set_level(None)
+
+    def set_level(self, pct, alert_override: str = None):
+        """pct = 0..100, ou None si pas de donnee BMS.
+        alert_override : texte rouge impose (ex. plafond non confirme)."""
+        alert = ""
+        if pct is None:
+            self._value.setText("--")
+            self._bar.setValue(0)
+            name = "chargeNone"
+        else:
+            pct = max(0, min(100, int(round(pct))))
+            self._value.setText("%d" % pct)
+            self._bar.setValue(pct)
+            if pct <= self._stop:
+                name, alert = "chargeLow", self._stop_text
+            elif pct <= self._warn:
+                name, alert = "chargeMid", self._warn_text
+            else:
+                name = "chargeOk"
+        self._alert.setText(alert_override if alert_override is not None else alert)
+        if self._bar.objectName() != name:
+            self._bar.setObjectName(name)
+            self._bar.style().unpolish(self._bar)
+            self._bar.style().polish(self._bar)

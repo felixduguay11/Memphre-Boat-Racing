@@ -6,7 +6,7 @@
 //  hot, esc[]) → l'UI (Real_V1_UI) et l'outil d'analyse marchent
 //  sans modification. Champs ajoutés (objets imbriqués, aplatis
 //  par json_graph_ui.py en « imu.roll », « wd.pil.ok », ...) :
-//    arme, cmode, pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
+//    arme, cmode, bat_cap (1 = plafond batterie basse actif), pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
 //  ⚠ "target" / "ramped" sont dans l'unité de MODE_COMMANDE
 //    (cmode : ERPM = eRPM, DUTY = ‰).
 //
@@ -148,7 +148,8 @@ static void sendTelemetry()
            k ? "," : "", e.id, e.vivant ? 1 : 0, (long)e.erpm, fin(e.duty),
            fin(e.i_mot), fin(e.i_in), fin(e.v_in), fin(e.t_fet), fin(e.t_mot));
     }
-    ap("],\"arme\":%d,\"cmode\":\"%s\"", s.arme ? 1 : 0, CMD_NOM);
+    ap("],\"arme\":%d,\"cmode\":\"%s\",\"bat_cap\":%d", s.arme ? 1 : 0, CMD_NOM,
+       (xEventGroupGetBits(egEtat) & EVT_BATT_BASSE) ? 1 : 0);
 
     // --- Pilote ---
     // brut : switchs avant anti-rebond (bits 0 ON, 1 F/R, 2 CTL, 3 START)
@@ -217,8 +218,15 @@ static void handlePiCommand(const char* line)
     const char* p = strstr(line, "\"cmd\"");
     if (!p) return;
 
+    // Batterie basse (BMS lu par le Pi) → plafond de consigne
+    if (strstr(p, "batt_basse")) {
+        xEventGroupSetBits(egEtat, EVT_BATT_BASSE);
+    }
+    else if (strstr(p, "batt_ok")) {
+        xEventGroupClearBits(egEtat, EVT_BATT_BASSE);
+    }
     // Paramètres des VESC : renvoyer les configs déjà lues
-    if (strstr(p, "escconf")) {
+    else if (strstr(p, "escconf")) {
         EscParams_DemanderRenvoi();
     }
     // Calibration du levier (testée AVANT start/stop) → Task_Pilote

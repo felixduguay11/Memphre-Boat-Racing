@@ -2,7 +2,7 @@
 """
 config.py — tout ce qui se regle sans toucher au code de l'UI.
 
-Ajouter une metrique = ajouter une ligne dans TOP_METRICS.
+Ajouter une metrique = ajouter une ligne dans TOP_METRICS (carte V | A | W).
 Ajouter un ESC = ajouter son id dans ESC_IDS.
 """
 
@@ -121,7 +121,11 @@ TOP_METRICS: List[Metric] = [
     Metric("Puissance", lambda d: "%d"   % round(power_w(d)), "W"),
 ]
 
-TOP_COLUMNS = 3
+TOP_COLUMNS = 3              # ancien affichage (une carte par valeur)
+
+# Rangee du haut de la page Moteurs : TOP_METRICS dans une seule carte
+# (moitie gauche) et la charge du BMS en barre (moitie droite).
+CHARGE_LABEL = "Charge"
 
 
 # ------------------------------------------------------------ carte par ESC
@@ -301,3 +305,162 @@ def position_text(d: dict) -> str:
 def altitude_text(d: dict) -> str:
     g = _gps(d)
     return "%.1f m" % g["alt"] if g.get("alt_ok") else "--"
+
+
+# ------------------------------------------------------------ BMS (Bluetooth)
+# Le Pi lit le BMS ANT de la batterie directement en BLE (ui/bms.py).
+# L'app ANT BMS du telephone doit etre FERMEE : une seule connexion a la fois.
+BMS_ENABLED = True
+# Debut du nom Bluetooth (ANT-BLE16ZMUB, ANT@BLE22AAUB... -> "ANT").
+# Plus sur une fois connu : BMS_ADDRESS = "AA:BB:CC:DD:EE:FF" (ignore le nom).
+BMS_NAME_PREFIX = "ANT"
+BMS_ADDRESS = "32:7F:4D:74:87:EB"   # ANT-BLE24CBUB-0812 (notre batterie)
+# "" = detection auto ; sinon "ant_bms" (recent) ou "ant_leg_bms" (ancien)
+BMS_TYPE = ""
+BMS_SECRET = ""             # mot de passe BLE si le BMS en a un, sinon vide
+BMS_PERIOD_S = 1.0          # une lecture par seconde suffit
+BMS_STALE_S = 5.0           # au-dela : "--" a l'ecran, jamais une vieille valeur
+
+# Alarmes BMS (a ajuster selon la chimie du pack)
+# Charge batterie (% du BMS) :
+#   > BMS_WARN_SOC          barre verte
+#   <= BMS_WARN_SOC         barre jaune + "Attention" en rouge
+#   <= BMS_CAP_SOC          barre rouge + vitesse plafonnee : le Pi envoie
+#                           BATT_BASSE_PAYLOAD et le Teensy limite la
+#                           consigne a BATT_BASSE_PCT % du max (config.h).
+# Le plafond n'est demande qu'apres BMS_CAP_CONFIRM mesures de suite sous
+# le seuil (une lecture BLE aberrante ne bride pas le bateau), puis il est
+# renvoye a chaque mesure (le Teensy l'oublie s'il redemarre). Il est
+# leve (BATT_OK_PAYLOAD) quand la charge remonte a BMS_CAP_SOC +
+# BMS_CAP_REARM (batterie changee ou rechargee).
+# NB : {"cmd":"stop"} n'arrete PAS les moteurs (seulement la telemetrie).
+BMS_WARN_SOC = 30           # %
+BMS_CAP_SOC = 20            # %
+BMS_CAP_CONFIRM = 2         # mesures consecutives (1 mesure / BMS_PERIOD_S)
+BMS_CAP_REARM = 3           # %
+BATT_BASSE_PCT = 20         # meme valeur que BATT_BASSE_PCT de config.h (affichage)
+BATT_BASSE_PAYLOAD = {"cmd": "batt_basse"}
+BATT_OK_PAYLOAD = {"cmd": "batt_ok"}
+CHARGE_WARN_TEXT = "Attention"
+CHARGE_CAP_TEXT = "Vitesse limitee"
+BMS_CELL_MIN_V = 3.30       # V, Li-ion NMC 18S (2.90 pour du LiFePO4)
+BMS_DELTA_MAX_V = 0.10      # V, ecart max entre cellules
+BMS_TEMP_MAX = 55.0         # °C
+
+
+def bms_log_record(sample: dict) -> dict:
+    """Mesure BMS telle qu'ecrite dans le log de session.
+    Cellules et sondes en dict ({"1": 3.71, ...}) : l'outil analyse/
+    les eclate en colonnes bms.cell.1, bms.cell.2... tracables."""
+    rec = {k: v for k, v in sample.items() if k not in ("cell_voltages", "temp_values")}
+    cells = sample.get("cell_voltages") or []
+    temps = sample.get("temp_values") or []
+    if cells:
+        rec["cell"] = {str(i + 1): v for i, v in enumerate(cells)}
+        rec["cell_min"] = min(cells)
+        rec["cell_max"] = max(cells)
+    if temps:
+        rec["temp"] = {str(i + 1): v for i, v in enumerate(temps)}
+        rec["temp_max"] = max(temps)
+    return rec
+
+
+def bat_cap(d: dict):
+    """Plafond batterie confirme par le Teensy : True / False, ou None si
+    la trame ne contient pas la cle (ancien firmware ou pas de trame)."""
+    return None if "bat_cap" not in d else bool(d["bat_cap"])
+
+
+def bms_soc(d: dict):
+    """Charge en % (BMS frais), ou None."""
+    return bms(d).get("battery_level")
+
+
+def bms(d: dict) -> dict:
+    """Mesure BMS fraiche, ou {} si absente / perimee."""
+    b = d.get("bms") or {}
+    return b if b.get("ok") else {}
+
+
+def _cells(d: dict) -> list:
+    return bms(d).get("cell_voltages") or []
+
+
+def _bms_fmt(key: str, fmt: str):
+    def f(d):
+        v = bms(d).get(key)
+        return fmt % v if v is not None else "--"
+    return f
+
+
+def bms_cell_min(d):
+    c = _cells(d)
+    return "%.3f" % min(c) if c else "--"
+
+
+def bms_cell_max(d):
+    c = _cells(d)
+    return "%.3f" % max(c) if c else "--"
+
+
+def bms_temp_max(d):
+    t = bms(d).get("temp_values") or []
+    return "%.0f" % max(t) if t else _bms_fmt("temperature", "%.0f")(d)
+
+
+# Grande carte a gauche
+BMS_SOC = Metric("Charge batterie", _bms_fmt("battery_level", "%d"), "%")
+
+# Une ligne par valeur a droite
+BMS_METRICS: List[Metric] = [
+    Metric("Tension",   _bms_fmt("voltage", "%.1f"), "V"),
+    Metric("Courant",   _bms_fmt("current", "%+.1f"), "A"),
+    Metric("Cell min",  bms_cell_min, "V"),
+    Metric("Cell max",  bms_cell_max, "V"),
+    Metric("Temp max",  bms_temp_max, "°C"),
+]
+
+
+def bms_status(d: dict):
+    """(texte, ok) pour la ligne du bas ; ok = None si pas de donnee."""
+    b = d.get("bms")
+    if not b:
+        return "BMS : pas de lien", None
+    if not b.get("ok"):
+        return "BMS : donnees perimees", False
+    alarmes = []
+    soc = b.get("battery_level")
+    if soc is not None and soc <= BMS_CAP_SOC:
+        alarmes.append("vitesse limitee")
+    elif soc is not None and soc <= BMS_WARN_SOC:
+        alarmes.append("charge basse")
+    c = b.get("cell_voltages") or []
+    if c and min(c) < BMS_CELL_MIN_V:
+        alarmes.append("cellule basse")
+    dv = b.get("delta_voltage")
+    if dv is not None and dv > BMS_DELTA_MAX_V:
+        alarmes.append("desequilibre")
+    t = b.get("temp_values") or []
+    if t and max(t) >= BMS_TEMP_MAX:
+        alarmes.append("chaud")
+    if b.get("dischrg_mosfet") is False:
+        alarmes.append("decharge coupee")
+    if b.get("problem") or b.get("problem_code"):
+        alarmes.append("defaut %s" % b.get("problem_code", ""))
+    if alarmes:
+        return "BMS : " + ", ".join(alarmes), False
+    return "BMS : OK", True
+
+
+def bms_info(d: dict) -> str:
+    b = bms(d)
+    if not b:
+        return "--"
+    parts = []
+    if b.get("delta_voltage") is not None:
+        parts.append("ecart %d mV" % round(b["delta_voltage"] * 1000))
+    if b.get("power") is not None:
+        parts.append("%d W" % round(b["power"]))
+    if b.get("cycle_charge") is not None:
+        parts.append("%.1f Ah" % b["cycle_charge"])
+    return "   ".join(parts) or "--"

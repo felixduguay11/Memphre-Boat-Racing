@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (
 )
 
 from . import config as cfg
-from .widgets import Card, RowCard, SpeedCard, Badge, EscCard, set_status_style
+from .widgets import (Card, RowCard, SpeedCard, Badge, EscCard, MultiCard, ChargeCard,
+                      set_status_style)
 
 CENTER = Qt.AlignmentFlag.AlignCenter
 
@@ -22,7 +23,7 @@ def _close_button(slot) -> QPushButton:
 
 
 # Pages de telemetrie, dans l'ordre des onglets
-PAGES = [("moteurs", "Moteurs"), ("xsens", "Xsens")]
+PAGES = [("moteurs", "Moteurs"), ("xsens", "Xsens"), ("bms", "BMS")]
 
 
 class _PageBar(QHBoxLayout):
@@ -35,7 +36,7 @@ class _PageBar(QHBoxLayout):
         for key, text in PAGES:
             b = QPushButton(text)
             b.setObjectName("tabOn" if key == active else "tab")
-            b.setFixedSize(122, 50)
+            b.setFixedSize(112, 50)
             b.clicked.connect(lambda _=False, k=key: on_page(k))
             self.addWidget(b)
         self.target = QLabel("--")
@@ -108,12 +109,22 @@ class StartScreen(QWidget):
         titre.setAlignment(CENTER)
         root.addWidget(titre)
 
+        # Message d'alerte (ex. arret automatique batterie basse)
+        self._msg = QLabel("")
+        self._msg.setObjectName("startAlert")
+        self._msg.setAlignment(CENTER)
+        self._msg.setWordWrap(True)
+        root.addWidget(self._msg)
+
         root.addStretch(2)
 
         go = QPushButton("Demarrer")
         go.setObjectName("primary")
         go.clicked.connect(lambda: self.started.emit(dict(self._payload)))
         root.addWidget(go)
+
+    def set_message(self, text: str):
+        self._msg.setText(text)
 
     def set_theme_label(self, current: str):
         """Le bouton annonce le theme vers lequel il bascule."""
@@ -198,11 +209,10 @@ class TelemetryScreen(QWidget):
     stopped = Signal()
     page_requested = Signal(str)
 
-    def __init__(self, metrics=None, esc_ids=None, columns: int = None):
+    def __init__(self, metrics=None, esc_ids=None):
         super().__init__()
         metrics = metrics or cfg.TOP_METRICS
         esc_ids = esc_ids or cfg.ESC_IDS
-        columns = columns or cfg.TOP_COLUMNS
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 12, 16, 12)
@@ -211,15 +221,16 @@ class TelemetryScreen(QWidget):
         self._bar = _PageBar("moteurs", self.page_requested.emit)
         root.addLayout(self._bar)
 
-        top = QGridLayout()
+        # Rangee du haut : V | A | W dans une carte (moitie gauche),
+        # charge batterie du BMS (moitie droite).
+        top = QHBoxLayout()
         top.setSpacing(8)
-        self._metrics = []
-        for n, m in enumerate(metrics):
-            c = Card(m.label, m.unit)
-            top.addWidget(c, n // columns, n % columns)
-            self._metrics.append((m, c))
-        for k in range(columns):
-            top.setColumnStretch(k, 1)              # colonnes de largeur egale
+        self._metrics = list(metrics)
+        self._power = MultiCard(self._metrics)
+        self._charge = ChargeCard(cfg.CHARGE_LABEL, cfg.BMS_WARN_SOC, cfg.BMS_CAP_SOC,
+                                  cfg.CHARGE_WARN_TEXT, cfg.CHARGE_CAP_TEXT)
+        top.addWidget(self._power, 1)
+        top.addWidget(self._charge, 1)
         root.addLayout(top)
 
         # Rangee du milieu : ESC | vitesse GPS | ESC (ordre de cfg.ESC_IDS)
@@ -245,11 +256,14 @@ class TelemetryScreen(QWidget):
         self._bar.update_data(d)
         self._speed.set_value(cfg.speed_text(d))
 
-        for m, card in self._metrics:
+        texts = []
+        for m in self._metrics:
             try:
-                card.set_value(m.value(d))
+                texts.append(m.value(d))
             except Exception:
-                card.set_value("--")
+                texts.append("--")
+        self._power.set_values(texts)
+        self.update_bms(d)
 
         seen = set()
         for e in d.get("esc", []) or []:
@@ -267,6 +281,21 @@ class TelemetryScreen(QWidget):
         for i, card in self._esc_cards.items():
             if i not in seen:
                 self._esc_offline(i, card, "absent de la trame")
+
+    def update_bms(self, d: dict):
+        """Barre de charge seule : appelee aussi quand le Teensy se tait.
+        Sous le seuil, le texte dit si le Teensy a bien applique le plafond."""
+        soc = cfg.bms_soc(d)
+        txt = None
+        if soc is not None and soc <= cfg.BMS_CAP_SOC:
+            cap = cfg.bat_cap(d)
+            if cap is None:
+                txt = "Limite ?"           # ancien firmware : pas de confirmation
+            elif not cap:
+                txt = "Limite en attente"
+            else:
+                txt = "Limite %d %%" % cfg.BATT_BASSE_PCT
+        self._charge.set_level(soc, txt)
 
     def _update_temps(self, esc_id, card, e: dict):
         for n, chk in enumerate(cfg.ESC_TEMPS):
@@ -361,6 +390,74 @@ class XsensScreen(QWidget):
             set_status_style(w, ok)
         self._pos.setText(cfg.position_text(d))
         self._alt.setText(cfg.altitude_text(d))
+
+
+class BmsScreen(QWidget):
+    """Page BMS : charge en tres gros, tension / courant / cellules /
+    temperature, etat et alarmes. Donnees lues en Bluetooth par le Pi."""
+    stopped = Signal()
+    page_requested = Signal(str)
+
+    def __init__(self, metrics=None):
+        super().__init__()
+        metrics = metrics or cfg.BMS_METRICS
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 12, 16, 12)
+        root.setSpacing(8)
+
+        self._bar = _PageBar("bms", self.page_requested.emit)
+        root.addLayout(self._bar)
+
+        main = QHBoxLayout()
+        main.setSpacing(8)
+        self._soc = Card(cfg.BMS_SOC.label, cfg.BMS_SOC.unit, "speedValue",
+                         center=True, unit_name="speedUnit")
+        main.addWidget(self._soc, 1)
+
+        colw = QWidget()
+        colw.setFixedWidth(350)
+        col = QVBoxLayout(colw)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(6)
+        self._metrics = []
+        for m in metrics:
+            c = RowCard(m.label, m.unit)
+            col.addWidget(c, 1)
+            self._metrics.append((m, c))
+        main.addWidget(colw)
+        root.addLayout(main, 1)
+
+        info = QFrame()
+        info.setObjectName("card")
+        lay = QHBoxLayout(info)
+        lay.setContentsMargins(12, 6, 12, 6)
+        self._state = QLabel("--")
+        set_status_style(self._state, None)
+        lay.addWidget(self._state)
+        lay.addStretch()
+        self._info = QLabel("--")
+        self._info.setObjectName("smallValue")
+        lay.addWidget(self._info)
+        root.addWidget(info)
+
+        root.addWidget(_stop_button(self.stopped.emit))
+
+    def update_data(self, d: dict):
+        self._bar.update_data(d)
+        self.update_bms(d)
+
+    def update_bms(self, d: dict):
+        """Partie BMS seule : appelee aussi quand le Teensy se tait."""
+        for m, card in [(cfg.BMS_SOC, self._soc)] + self._metrics:
+            try:
+                card.set_value(m.value(d))
+            except Exception:
+                card.set_value("--")
+        text, ok = cfg.bms_status(d)
+        self._state.setText(text)
+        set_status_style(self._state, ok)
+        self._info.setText(cfg.bms_info(d))
 
 
 class CalibScreen(QWidget):
