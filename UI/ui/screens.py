@@ -238,6 +238,7 @@ class TelemetryScreen(QWidget):
         grid.setSpacing(8)
         self._esc_cards = {}
         self._temp_ok = {}      # (id ESC, cle) -> etat precedent, pour l'hysteresis
+        self._batt_temp_ok = True   # idem pour la temperature batterie
         cols = [0, 2]           # colonne 1 = vitesse
         for n, i in enumerate(esc_ids):
             c = EscCard("ESC %d" % i, cfg.esc_unit(), len(cfg.ESC_TEMPS))
@@ -296,6 +297,14 @@ class TelemetryScreen(QWidget):
             else:
                 txt = "Limite %d %%" % cfg.BATT_BASSE_PCT
         self._charge.set_level(soc, txt)
+        t = cfg.bms_temp(d)
+        if t is None:
+            self._batt_temp_ok = True
+            self._charge.set_temp("%s : --" % cfg.BMS_TEMP_LABEL, None)
+        else:
+            self._batt_temp_ok = cfg.temp_ok(t, cfg.BMS_TEMP_MAX, self._batt_temp_ok)
+            self._charge.set_temp(cfg.bms_temp_text(t, self._batt_temp_ok),
+                                  self._batt_temp_ok)
 
     def _update_temps(self, esc_id, card, e: dict):
         for n, chk in enumerate(cfg.ESC_TEMPS):

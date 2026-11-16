@@ -345,7 +345,19 @@ CHARGE_WARN_TEXT = "Attention"
 CHARGE_CAP_TEXT = "Vitesse limitee"
 BMS_CELL_MIN_V = 3.30       # V, Li-ion NMC 18S (2.90 pour du LiFePO4)
 BMS_DELTA_MAX_V = 0.10      # V, ecart max entre cellules
+# Temperature batterie : affichee "TEMP : OK" / "TEMP : NOT OK xx°C" sur
+# la page Moteurs, comme les ESC (meme hysteresis TEMP_HYST).
+# Li-ion NMC : la plupart des fiches de cellules limitent la decharge a
+# 60 °C ; l'alerte tombe avant. Verifier la fiche des cellules du pack et
+# la protection haute temperature reglee dans l'app ANT BMS.
 BMS_TEMP_MAX = 55.0         # °C
+BMS_TEMP_LABEL = "TEMP"
+
+
+def bms_temp_text(t: float, ok: bool) -> str:
+    """Comme temp_text des ESC, en plus court quand ce n'est pas OK
+    (la place est partagee avec "Attention" / "Limite 20 %")."""
+    return "%s : OK" % BMS_TEMP_LABEL if ok else "NOT OK %.0f°C" % t
 
 
 def bms_log_record(sample: dict) -> dict:
@@ -369,6 +381,15 @@ def bat_cap(d: dict):
     """Plafond batterie confirme par le Teensy : True / False, ou None si
     la trame ne contient pas la cle (ancien firmware ou pas de trame)."""
     return None if "bat_cap" not in d else bool(d["bat_cap"])
+
+
+def bms_temp(d: dict):
+    """Temperature batterie la plus haute (BMS frais), ou None."""
+    b = bms(d)
+    t = b.get("temp_values") or []
+    if t:
+        return max(t)
+    return b.get("temperature")
 
 
 def bms_soc(d: dict):

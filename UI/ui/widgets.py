@@ -202,9 +202,10 @@ class MultiCard(QFrame):
 
 
 class ChargeCard(QFrame):
-    """Charge batterie : pourcentage + barre qui se vide.
-    Vert au-dessus de `warn`, jaune + texte d'alerte rouge a `warn` et
-    moins, rouge + autre texte a `stop` et moins."""
+    """Batterie : temperature en gros en haut a droite, barre de charge
+    avec le pourcentage a sa droite.
+    Barre verte au-dessus de `warn`, jaune + texte d'alerte rouge a `warn`
+    et moins, rouge + autre texte a `stop` et moins."""
 
     def __init__(self, label: str, warn: int, stop: int,
                  warn_text: str = "Attention", stop_text: str = "Vitesse limitee"):
@@ -217,36 +218,59 @@ class ChargeCard(QFrame):
         lay.setContentsMargins(14, 6, 14, 10)
         lay.setSpacing(4)
 
+        # En-tete : etiquette (remplacee par l'alerte rouge quand il y en
+        # a une), etat temperature a droite (comme les ESC)
         head = QHBoxLayout()
+        head.setSpacing(6)
+        self._label_text = label
         self._label = QLabel(label);  self._label.setObjectName("cardLabel")
-        self._alert = QLabel("");     self._alert.setObjectName("chargeAlert")
-        self._value = QLabel("--");   self._value.setObjectName("chargeValue")
-        self._unit = QLabel("%");     self._unit.setObjectName("cardUnit")
-        self._alert.setAlignment(CENTER)
-        head.addWidget(self._label, 0, Qt.AlignmentFlag.AlignTop)
-        head.addWidget(self._alert, 1, Qt.AlignmentFlag.AlignVCenter)
-        head.addWidget(self._value, 0, BOTTOM)
-        head.addWidget(self._unit, 0, BOTTOM)
+        self._temp = QLabel("--")
+        self._label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        head.addWidget(self._label, 1, Qt.AlignmentFlag.AlignVCenter)
+        head.addWidget(self._temp, 0, Qt.AlignmentFlag.AlignVCenter)
         lay.addLayout(head)
+        lay.addStretch(1)
 
+        # Barre de charge + pourcentage a droite
+        row = QHBoxLayout()
+        row.setSpacing(10)
         self._bar = QProgressBar()
         self._bar.setRange(0, 100)
         self._bar.setTextVisible(False)
-        self._bar.setFixedHeight(22)
-        lay.addWidget(self._bar)
+        self._bar.setFixedHeight(26)
+        self._pct = QLabel("-- %")
+        self._pct.setObjectName("chargePct")
+        self._pct.setAlignment(RIGHT_V)
+        self._pct.setMinimumWidth(70)
+        row.addWidget(self._bar, 1)
+        row.addWidget(self._pct)
+        lay.addLayout(row)
         self.set_level(None)
+
+    @staticmethod
+    def _restyle(w, name):
+        if w.objectName() != name:
+            w.setObjectName(name)
+            w.style().unpolish(w)
+            w.style().polish(w)
+
+    def set_temp(self, text: str, ok):
+        """Etat temperature, comme les ESC : ok = True (vert), False
+        (rouge) ou None (pas de donnee)."""
+        self._temp.setText(text)
+        set_status_style(self._temp, ok)
 
     def set_level(self, pct, alert_override: str = None):
         """pct = 0..100, ou None si pas de donnee BMS.
         alert_override : texte rouge impose (ex. plafond non confirme)."""
         alert = ""
         if pct is None:
-            self._value.setText("--")
+            self._pct.setText("-- %")
             self._bar.setValue(0)
             name = "chargeNone"
         else:
             pct = max(0, min(100, int(round(pct))))
-            self._value.setText("%d" % pct)
+            self._pct.setText("%d %%" % pct)
             self._bar.setValue(pct)
             if pct <= self._stop:
                 name, alert = "chargeLow", self._stop_text
@@ -254,8 +278,7 @@ class ChargeCard(QFrame):
                 name, alert = "chargeMid", self._warn_text
             else:
                 name = "chargeOk"
-        self._alert.setText(alert_override if alert_override is not None else alert)
-        if self._bar.objectName() != name:
-            self._bar.setObjectName(name)
-            self._bar.style().unpolish(self._bar)
-            self._bar.style().polish(self._bar)
+        alert = alert_override if alert_override is not None else alert
+        self._label.setText(alert or self._label_text)
+        self._restyle(self._label, "chargeAlert" if alert else "cardLabel")
+        self._restyle(self._bar, name)

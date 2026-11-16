@@ -75,6 +75,7 @@ QLabel#speedMid   {{ font-size:80px; font-weight:600; }}
 QLabel#multiValue {{ font-size:34px; font-weight:600; }}
 QLabel#multiUnit  {{ font-size:18px; color:{muted}; }}
 QLabel#chargeValue {{ font-size:40px; font-weight:600; }}
+QLabel#chargePct   {{ font-size:30px; font-weight:600; }}
 QLabel#chargeAlert {{ font-size:26px; font-weight:700; color:{alert}; }}
 QLabel#startAlert  {{ font-size:24px; font-weight:700; color:{alert}; }}
 QProgressBar {{ background:{line}; border:none; border-radius:8px; }}
