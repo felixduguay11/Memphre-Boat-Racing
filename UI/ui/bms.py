@@ -19,6 +19,7 @@ telephone doit etre fermee, sinon le Pi ne le trouve pas.
 """
 
 import asyncio
+import contextlib
 import math
 import threading
 import time
@@ -32,6 +33,15 @@ try:
     from aiobmsble.utils import bms_cls, bms_identify
 except ImportError:              # l'UI doit demarrer meme sans BLE
     BleakScanner = None
+
+
+CONNECT_TIMEOUT_S = 40.0     # connexion BLE (avec ses 4 essais) + init du protocole
+
+
+def clean_name(name: str) -> str:
+    """Certains BMS ANT ont un \\r ou un \\0 dans leur nom BLE : le \\r
+    ramene le curseur en debut de ligne et efface le debut du message."""
+    return "".join(c for c in name if c.isprintable()).strip()
 
 
 def to_plain(sample: dict) -> dict:
@@ -79,6 +89,10 @@ class BleBms(BaseBms):
         self._scan_s = scan_s
         self._run = False
         self._thread = None
+        # Plusieurs BMS : verrou partage pour ne jamais scanner pendant
+        # qu'un autre lien se connecte (la radio du PC / Pi fait l'un
+        # ou l'autre ; les deux en meme temps font rater la connexion).
+        self._conn_lock = None
 
     def start_link(self):
         if BleakScanner is None:
@@ -108,7 +122,7 @@ class BleBms(BaseBms):
         return name.startswith(self._prefix)
 
     async def _find(self):
-        """(BLEDevice, classe BMS) ou (None, None)."""
+        """(BLEDevice, classe BMS, nom) ou (None, None, "")."""
         found = {}
 
         def cb(dev, adv):
@@ -124,7 +138,7 @@ class BleBms(BaseBms):
                     break
                 await asyncio.sleep(0.2)
         if not found:
-            return None, None
+            return None, None, ""
         if len(found) > 1:
             self.status.emit("BMS : %d appareils '%s' autour, fixer BMS_ADDRESS : %s" % (
                 len(found), self._prefix,
@@ -136,7 +150,7 @@ class BleBms(BaseBms):
             cls = await bms_identify(adv, dev.address)
             if cls is None:                          # nom inconnu d'aiobmsble
                 cls = await bms_cls("ant_bms")
-        return dev, cls
+        return dev, cls, clean_name(adv.local_name or dev.name or "?")
 
     async def _sleep(self, s: float):
         t0 = time.monotonic()
@@ -146,33 +160,51 @@ class BleBms(BaseBms):
     async def _main(self):
         while self._run:
             self.status.emit("BMS : recherche de '%s'..." % (self._address or self._prefix))
+            stack = contextlib.AsyncExitStack()
             try:
-                dev, cls = await self._find()
-            except Exception as e:
-                self.status.emit("BMS : scan impossible (%s)" % e)
-                await self._sleep(5.0)
-                continue
-            if dev is None:
-                self.status.emit("BMS : introuvable (endormi ? app du telephone connectee ?)")
+                # Scan + connexion sous le verrou ; la lecture se fait hors verrou
+                async with (self._conn_lock or contextlib.nullcontext()):
+                    try:
+                        dev, cls, name = await self._find()
+                    except Exception as e:
+                        self.status.emit("BMS : scan impossible (%s)" % e)
+                        dev = cls = None
+                        name = "scan"
+                    if dev is not None and cls is not None:
+                        self.status.emit("BMS : %s (%s) -> %s" % (name, dev.address, cls.__module__))
+                        # Connexion + premier echange bornes : sinon un BMS qui
+                        # ne parle pas ce protocole bloque sans rien dire.
+                        bms = await asyncio.wait_for(stack.enter_async_context(
+                            cls(ble_device=dev,
+                                config=BMSConfig(keep_alive=True, secret=self._secret))),
+                            timeout=CONNECT_TIMEOUT_S)
+                if dev is None:
+                    if name != "scan":
+                        self.status.emit("BMS : introuvable (endormi ? hors de portee ? "
+                                         "app du telephone connectee ?)")
+                    await self._sleep(2.0)
+                    continue
+                if cls is None:
+                    self.status.emit("BMS : type '%s' inconnu d'aiobmsble" % self._type)
+                    return
+                self.status.emit("BMS : connecte")
+                while self._run:
+                    t0 = time.monotonic()
+                    data = await asyncio.wait_for(bms.async_update(), timeout=10.0)
+                    self.sample.emit(to_plain(data))
+                    await self._sleep(max(0.0, self._period - (time.monotonic() - t0)))
+            except asyncio.TimeoutError:
+                self.status.emit("BMS : pas de reponse en %d s (protocole ? essayer "
+                                 "BMS_TYPE = \"ant_leg_bms\")" % CONNECT_TIMEOUT_S)
                 await self._sleep(2.0)
-                continue
-            if cls is None:
-                self.status.emit("BMS : type '%s' inconnu d'aiobmsble" % self._type)
-                return
-
-            self.status.emit("BMS : %s (%s) -> %s" % (dev.name, dev.address, cls.__module__))
-            try:
-                async with cls(ble_device=dev,
-                               config=BMSConfig(keep_alive=True, secret=self._secret)) as bms:
-                    self.status.emit("BMS : connecte")
-                    while self._run:
-                        t0 = time.monotonic()
-                        data = await asyncio.wait_for(bms.async_update(), timeout=10.0)
-                        self.sample.emit(to_plain(data))
-                        await self._sleep(max(0.0, self._period - (time.monotonic() - t0)))
             except Exception as e:
                 self.status.emit("BMS : lien perdu (%s: %s)" % (type(e).__name__, e))
                 await self._sleep(2.0)
+            finally:
+                try:
+                    await stack.aclose()             # deconnexion propre
+                except Exception:
+                    pass
 
 
 # ----------------------------------------------------------- simulation
@@ -215,25 +247,60 @@ class SimBms(BaseBms):
 
 
 class MultiBms(BaseBms):
-    """Plusieurs BMS lus en meme temps (un lien par batterie, chacun son
-    thread). Chaque mesure sort avec "_pack" = numero de la batterie
-    (0, 1, ...) ; MainWindow les combine (config.bms_combine)."""
+    """Plusieurs BMS lus en meme temps. Chaque mesure sort avec
+    "_pack" = numero de la batterie (0, 1, ...) ; MainWindow les combine
+    (config.bms_combine).
+    Liens BLE : UN seul thread et UNE boucle asyncio pour tous, avec un
+    verrou commun sur scan + connexion (une radio Bluetooth ne fait pas
+    bien les deux en meme temps). Une fois connectes, les BMS sont lus
+    en parallele."""
 
     def __init__(self, links):
         super().__init__()
         self.n = len(links)
         self._links = links
+        self._thread = None
         for k, link in enumerate(links):
             link.sample.connect(lambda d, k=k: self.sample.emit(dict(d, _pack=k)))
             link.status.connect(lambda t, k=k: self.status.emit("[%d] %s" % (k + 1, t)))
 
+    def _ble(self) -> bool:
+        return all(isinstance(l, BleBms) for l in self._links)
+
     def start_link(self):
+        if not self._ble():
+            for link in self._links:
+                link.start_link()
+            return
+        if BleakScanner is None:
+            self.status.emit("BMS : bleak/aiobmsble absents (pip install aiobmsble)")
+            return
+        if self._thread and self._thread.is_alive():
+            return
         for link in self._links:
-            link.start_link()
+            link._run = True
+        self._thread = threading.Thread(target=self._thread_main, name="bms", daemon=True)
+        self._thread.start()
+
+    def _thread_main(self):
+        async def run_all():
+            lock = asyncio.Lock()
+            for link in self._links:
+                link._conn_lock = lock
+            await asyncio.gather(*(link._main() for link in self._links))
+        try:
+            asyncio.run(run_all())
+        except Exception as e:
+            self.status.emit("BMS : thread arrete (%s)" % e)
 
     def stop_link(self):
         for link in self._links:
-            link.stop_link()
+            link._run = False
+        if self._thread:
+            self._thread.join(timeout=5.0)
+        elif not self._ble():
+            for link in self._links:
+                link.stop_link()
 
 
 def make_bms(cfg, simulated: bool) -> BaseBms:

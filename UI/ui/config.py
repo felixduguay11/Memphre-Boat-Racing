@@ -321,9 +321,9 @@ BMS_ADDRESS = "32:7F:4D:74:87:EB"   # ANT-BLE24CBUB-0812 (notre batterie)
 # Le Pi se connecte aux deux BMS en parallele ; l'UI affiche le pire des
 # deux (charge la plus basse, temperature la plus haute, cellule la plus
 # basse) et le plafond 20 % part de la charge la plus basse.
-BMS_ADDRESSES = []
-# BMS_ADDRESSES = ["87:85:96:56:B1:2E",    # ANT@BLE16ZNUB-3KM7 (batterie 1)
-#                  "84:66:2F:2E:86:38"]    # ANT@BLE16ZNUB-CF4J (batterie 2)
+#BMS_ADDRESSES = []
+#BMS_ADDRESSES = ["87:85:96:56:B1:2E",    # ANT@BLE16ZNUB-3KM7 (batterie 1)
+#                 "84:66:2F:2E:86:38"]    # ANT@BLE16ZNUB-CF4J (batterie 2)
 # Branchement des deux packs : "parallele" (tensions egales, courants
 # additionnes) ou "serie" (tensions additionnees, meme courant).
 BMS_MONTAGE = "parallele"
