@@ -50,6 +50,7 @@ class MainWindow(QStackedWidget):
         self._bms_t = 0.0           # heure de reception (monotonic)
         self._bms_low_n = 0         # mesures consecutives sous BMS_CAP_SOC
         self._bat_cap = False       # plafond batterie demande au Teensy
+        self._packs = {}            # plusieurs BMS : n -> (mesure, heure)
         self._last_frame = {}
         if self.bms is not None:
             self.bms.sample.connect(self._on_bms)
@@ -133,11 +134,25 @@ class MainWindow(QStackedWidget):
 
     # ------------------------------------------------------------ BMS
     def _on_bms(self, sample: dict):
-        self._bms = sample
-        self._bms_t = time.monotonic()
-        # Log : une ligne par mesure BMS (1 Hz), a part des trames Teensy
-        self.logger.write({"type": "bms", "bms": cfg.bms_log_record(sample)})
-        self._check_bms_cap(sample.get("battery_level"))
+        now = time.monotonic()
+        k = sample.pop("_pack", None)
+        if k is None:                       # une seule batterie
+            self._bms, self._bms_t = sample, now
+            # Log : une ligne par mesure BMS (1 Hz), a part des trames Teensy
+            self.logger.write({"type": "bms", "bms": cfg.bms_log_record(sample)})
+        else:                               # plusieurs batteries
+            self._packs[k] = (sample, now)
+            self.logger.write({"type": "bms", "bms%d" % (k + 1): cfg.bms_log_record(sample)})
+            n = getattr(self.bms, "n", len(self._packs))
+            if len(self._packs) < n:
+                return                      # on attend une mesure de chaque pack
+            packs = [self._packs[i] for i in sorted(self._packs)]
+            self._bms = cfg.bms_combine([p for p, _ in packs])
+            # Age = celui du pack le plus vieux : un BMS muet rend tout perime
+            self._bms_t = min(t for _, t in packs)
+            if now - self._bms_t >= cfg.BMS_STALE_S:
+                return                      # pas de plafond sur une donnee perimee
+        self._check_bms_cap(self._bms.get("battery_level"))
 
     def _check_bms_cap(self, soc):
         """Plafond de consigne quand la charge tombe a BMS_CAP_SOC.

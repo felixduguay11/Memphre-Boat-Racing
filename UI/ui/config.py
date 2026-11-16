@@ -315,6 +315,18 @@ BMS_ENABLED = True
 # Plus sur une fois connu : BMS_ADDRESS = "AA:BB:CC:DD:EE:FF" (ignore le nom).
 BMS_NAME_PREFIX = "ANT"
 BMS_ADDRESS = "32:7F:4D:74:87:EB"   # ANT-BLE24CBUB-0812 (notre batterie)
+
+# Deux batteries en meme temps (futures, une par BMS) : decommenter les
+# deux lignes BMS_ADDRESSES / BMS_MONTAGE. BMS_ADDRESS est alors ignore.
+# Le Pi se connecte aux deux BMS en parallele ; l'UI affiche le pire des
+# deux (charge la plus basse, temperature la plus haute, cellule la plus
+# basse) et le plafond 20 % part de la charge la plus basse.
+BMS_ADDRESSES = []
+# BMS_ADDRESSES = ["87:85:96:56:B1:2E",    # ANT@BLE16ZNUB-3KM7 (batterie 1)
+#                  "84:66:2F:2E:86:38"]    # ANT@BLE16ZNUB-CF4J (batterie 2)
+# Branchement des deux packs : "parallele" (tensions egales, courants
+# additionnes) ou "serie" (tensions additionnees, meme courant).
+BMS_MONTAGE = "parallele"
 # "" = detection auto ; sinon "ant_bms" (recent) ou "ant_leg_bms" (ancien)
 BMS_TYPE = ""
 BMS_SECRET = ""             # mot de passe BLE si le BMS en a un, sinon vide
@@ -345,12 +357,13 @@ CHARGE_WARN_TEXT = "Attention"
 CHARGE_CAP_TEXT = "Vitesse limitee"
 BMS_CELL_MIN_V = 3.30       # V, Li-ion NMC 18S (2.90 pour du LiFePO4)
 BMS_DELTA_MAX_V = 0.10      # V, ecart max entre cellules
-# Temperature batterie : affichee "TEMP : OK" / "TEMP : NOT OK xx°C" sur
-# la page Moteurs, comme les ESC (meme hysteresis TEMP_HYST).
-# Li-ion NMC : la plupart des fiches de cellules limitent la decharge a
-# 60 °C ; l'alerte tombe avant. Verifier la fiche des cellules du pack et
-# la protection haute temperature reglee dans l'app ANT BMS.
-BMS_TEMP_MAX = 55.0         # °C
+# Temperature batterie : affichee "TEMP : OK" / "NOT OK xx°C" sur la page
+# Moteurs, comme les ESC (meme hysteresis TEMP_HYST : retour a OK sous
+# BMS_TEMP_MAX - TEMP_HYST).
+# Max du pack : 54 °C. L'alerte tombe 4 °C avant pour laisser au pilote
+# le temps de reduire avant d'atteindre la limite.
+BMS_TEMP_LIMITE = 54.0      # °C, maximum du pack (info)
+BMS_TEMP_MAX = 50.0         # °C, seuil d'alerte
 BMS_TEMP_LABEL = "TEMP"
 
 
@@ -473,11 +486,55 @@ def bms_status(d: dict):
     return "BMS : OK", True
 
 
+def bms_combine(samples: list, montage: str = None) -> dict:
+    """Plusieurs packs -> une mesure. Securite d'abord : charge la plus
+    basse, temperature la plus haute, toutes les cellules ensemble."""
+    montage = montage or BMS_MONTAGE
+    if len(samples) == 1:
+        return dict(samples[0])
+
+    def vals(k):
+        return [s[k] for s in samples if s.get(k) is not None]
+
+    out = {"packs": [{"soc": s.get("battery_level"), "v": s.get("voltage"),
+                      "i": s.get("current")} for s in samples]}
+    v, i = vals("voltage"), vals("current")
+    if v:
+        out["voltage"] = sum(v) if montage == "serie" else sum(v) / len(v)
+    if i:
+        out["current"] = sum(i) / len(i) if montage == "serie" else sum(i)
+    if vals("power"):
+        out["power"] = sum(vals("power"))
+    if vals("battery_level"):
+        out["battery_level"] = min(vals("battery_level"))
+    if vals("cycle_charge"):
+        c = vals("cycle_charge")
+        out["cycle_charge"] = min(c) if montage == "serie" else sum(c)
+    cells = [c for s in samples for c in (s.get("cell_voltages") or [])]
+    if cells:
+        out["cell_voltages"] = cells
+        out["delta_voltage"] = max(cells) - min(cells)
+    temps = [t for s in samples for t in (s.get("temp_values") or [])]
+    if temps:
+        out["temp_values"] = temps
+    if vals("temperature"):
+        out["temperature"] = max(vals("temperature"))
+    for k in ("chrg_mosfet", "dischrg_mosfet"):
+        if vals(k):
+            out[k] = all(vals(k))
+    out["problem"] = any(vals("problem"))
+    out["problem_code"] = 0
+    for c in vals("problem_code"):
+        out["problem_code"] |= int(c)
+    return out
+
+
 def bms_info(d: dict) -> str:
     b = bms(d)
     if not b:
         return "--"
-    parts = []
+    parts = ["P%d %s %%" % (n + 1, "--" if p.get("soc") is None else p["soc"])
+             for n, p in enumerate(b.get("packs") or [])]
     if b.get("delta_voltage") is not None:
         parts.append("ecart %d mV" % round(b["delta_voltage"] * 1000))
     if b.get("power") is not None:

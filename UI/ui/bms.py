@@ -214,8 +214,38 @@ class SimBms(BaseBms):
         })
 
 
+class MultiBms(BaseBms):
+    """Plusieurs BMS lus en meme temps (un lien par batterie, chacun son
+    thread). Chaque mesure sort avec "_pack" = numero de la batterie
+    (0, 1, ...) ; MainWindow les combine (config.bms_combine)."""
+
+    def __init__(self, links):
+        super().__init__()
+        self.n = len(links)
+        self._links = links
+        for k, link in enumerate(links):
+            link.sample.connect(lambda d, k=k: self.sample.emit(dict(d, _pack=k)))
+            link.status.connect(lambda t, k=k: self.status.emit("[%d] %s" % (k + 1, t)))
+
+    def start_link(self):
+        for link in self._links:
+            link.start_link()
+
+    def stop_link(self):
+        for link in self._links:
+            link.stop_link()
+
+
 def make_bms(cfg, simulated: bool) -> BaseBms:
+    addresses = list(getattr(cfg, "BMS_ADDRESSES", []) or [])
+    if len(addresses) > 1:
+        if simulated:
+            return MultiBms([SimBms(cfg.BMS_PERIOD_S, soc0=40.0 + 4 * k)
+                             for k in range(len(addresses))])
+        return MultiBms([BleBms(cfg.BMS_NAME_PREFIX, a, cfg.BMS_TYPE,
+                                cfg.BMS_PERIOD_S, cfg.BMS_SECRET) for a in addresses])
     if simulated:
         return SimBms(cfg.BMS_PERIOD_S)
-    return BleBms(cfg.BMS_NAME_PREFIX, cfg.BMS_ADDRESS, cfg.BMS_TYPE,
+    address = addresses[0] if addresses else cfg.BMS_ADDRESS
+    return BleBms(cfg.BMS_NAME_PREFIX, address, cfg.BMS_TYPE,
                   cfg.BMS_PERIOD_S, cfg.BMS_SECRET)
