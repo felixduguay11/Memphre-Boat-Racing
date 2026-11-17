@@ -8,7 +8,7 @@
 // RPi        : USB (Serial = /dev/ttyACM0 côté Pi), JSON
 //
 // Architecture : voir Architecture2.png et include/rtos_com.h
-// Option foils : FOILS_ACTIFS dans config.h
+// Option foils : FOILS_ACTIFS dans config.h (SONARS_ACTIFS : sonars seuls)
 // =====================================================
 
 #include <arduino_freertos.h>
@@ -58,6 +58,8 @@ void setup()
   xTaskCreate(Task_Xsens,         "Xsens",  STACK_IMU,    NULL, PRIO_IMU,    &WD_handles[T_XSENS]);
 #if FOILS_ACTIFS
   xTaskCreate(Task_foils_Control, "Foils",  STACK_FOILS,  NULL, PRIO_FOILS,  &WD_handles[T_FOILS]);
+#endif
+#if SONARS_ACTIFS
   xTaskCreate(Task_LectureSonar,  "Sonar",  STACK_SONAR,  NULL, PRIO_SONAR,  &WD_handles[T_SONAR]);
 #endif
   xTaskCreate(Task_RPi,           "RPi",    STACK_RPI,    NULL, PRIO_RPI,    &WD_handles[T_RPI]);

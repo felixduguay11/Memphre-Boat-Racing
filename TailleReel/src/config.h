@@ -10,6 +10,15 @@
 //     CONTROLE est inatteignable. Xsens reste actif (logging
 //     GPS / attitude envoyé au Raspberry Pi).
 #define FOILS_ACTIFS    0
+
+// 1 = sonars lus et envoyés au Pi (blocs "son" / "sio") même sans
+//     foils : sert à vérifier les sonars à quai ou bateau à l'eau,
+//     servos NON commandés. Forcé à 1 quand FOILS_ACTIFS = 1.
+#define SONARS_ACTIFS   0
+#if FOILS_ACTIFS
+#undef  SONARS_ACTIFS
+#define SONARS_ACTIFS   1
+#endif
 //====================================//
 
 //------------- BAUDRATES ------------//

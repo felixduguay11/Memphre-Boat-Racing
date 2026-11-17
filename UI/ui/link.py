@@ -215,8 +215,21 @@ class SimLink(BaseLink):
         pil = {"raw": raw, "cal": int(self._cal), "cal_res": self._cres,
                "lmin": 300, "lmax": 700, "cmin": self._cmin if self._cal else 0,
                "cmax": self._cmax if self._cal else 0}
+        # Sonars + foils (blocs envoyes si SONARS_ACTIFS / FOILS_ACTIFS) :
+        # CONTROLE une periode sur deux, sonar avant non valide de temps en temps
+        ctl = (n // 200) % 2 == 1
+        son, sio, cmd, h = {}, {}, {}, {}
+        for k, (key, ph) in enumerate((("av", 0.0), ("ag", 1.3), ("ad", 2.6))):
+            son[key] = round(70.0 + 18.0 * math.sin(n / 22.0 + ph), 1)
+            sio[key] = 0 if key == "av" and n % 150 > 135 else 1
+            h[key] = round((70.0 - son[key]) * 0.4, 2) if ctl else 0.0
+            cmd[key] = round(min(163.0, max(120.0, 148.0 + h[key] * 1.5)), 1)
+        p_out = round(math.sin(n / 30.0) * 2.0, 2) if ctl else 0.0
+        r_out = round(math.sin(n / 18.0) * 3.0, 2) if ctl else 0.0
+        foils = {"on": int(ctl), "cmd": cmd, "h": h, "p": p_out, "r": r_out}
         self.telemetry.emit({"t": n * self._timer.interval(), "mode": "RUN",
-                             "run": "FORWARD", "target": int(erpm),
+                             "run": "CONTROLE" if ctl else "FORWARD",
+                             "son": son, "sio": sio, "foils": foils, "target": int(erpm),
                              "ramped": int(erpm), "esc": escs, "cmode": "ERPM",
                              "bat_cap": int(self._cap),
                              "imu": imu, "gps": gps, "pil": pil})

@@ -63,7 +63,8 @@ class SpeedCard(QFrame):
     """Etiquette, grande valeur centree, unite centree en dessous
     (carte etroite : l'unite ne tient pas a cote du chiffre)."""
 
-    def __init__(self, label: str, unit: str, value_name: str = "speedMid"):
+    def __init__(self, label: str, unit: str, value_name: str = "speedMid",
+                 sub_label: str = ""):
         super().__init__()
         self.setObjectName("card")
         lay = QVBoxLayout(self)
@@ -79,8 +80,21 @@ class SpeedCard(QFrame):
         lay.addWidget(self._value)
         lay.addWidget(self._unit)
         lay.addStretch()
+        # Ligne optionnelle en bas de la carte (ex. consigne moteur)
+        self._sub = None
+        if sub_label:
+            sl = QLabel(sub_label); sl.setObjectName("speedSubLabel")
+            sl.setAlignment(CENTER)
+            self._sub = QLabel("--"); self._sub.setObjectName("speedSub")
+            self._sub.setAlignment(CENTER)
+            lay.addWidget(sl)
+            lay.addWidget(self._sub)
 
     def set_value(self, text): self._value.setText(text)
+
+    def set_sub(self, text):
+        if self._sub is not None:
+            self._sub.setText(text)
 
 
 class RowCard(QFrame):
@@ -282,3 +296,60 @@ class ChargeCard(QFrame):
         self._label.setText(alert or self._label_text)
         self._restyle(self._label, "chargeAlert" if alert else "cardLabel")
         self._restyle(self._bar, name)
+
+
+class FoilCard(QFrame):
+    """Un foil : hauteur lue par le sonar en gros, etat du sonar, puis la
+    commande du servo (texte + barre entre butee min et butee max)."""
+
+    def __init__(self, label: str, unit: str):
+        super().__init__()
+        self.setObjectName("card")
+        # Largeur fixee par la grille, jamais par le texte
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 6, 14, 10)
+        lay.setSpacing(4)
+
+        head = QHBoxLayout()
+        self._label = QLabel(label); self._label.setObjectName("cardLabel")
+        self._unit = QLabel(unit);   self._unit.setObjectName("cardLabel")
+        head.addWidget(self._label)
+        head.addStretch()
+        head.addWidget(self._unit)
+        lay.addLayout(head)
+
+        self._value = QLabel("--");  self._value.setObjectName("escValue")
+        self._value.setAlignment(CENTER)
+        lay.addWidget(self._value, 1)
+
+        self._sonar = QLabel("--")
+        self._sonar.setAlignment(CENTER)
+        set_status_style(self._sonar, None)
+        lay.addWidget(self._sonar, 0, CENTER)
+
+        self._servo = QLabel("Servo : --"); self._servo.setObjectName("servoText")
+        self._servo.setAlignment(CENTER)
+        lay.addWidget(self._servo)
+        self._bar = QProgressBar()
+        self._bar.setRange(0, 1000)
+        self._bar.setTextVisible(False)
+        self._bar.setFixedHeight(16)
+        lay.addWidget(self._bar)
+        self.set_servo("Servo : --", None)
+
+    def set_value(self, text): self._value.setText(text)
+
+    def set_sonar(self, text: str, ok):
+        self._sonar.setText(text)
+        set_status_style(self._sonar, ok)
+
+    def set_servo(self, text: str, pct):
+        """pct = 0..100 entre butee min et max, ou None (barre vide)."""
+        self._servo.setText(text)
+        self._bar.setValue(0 if pct is None else int(round(pct * 10)))
+        name = "servoNone" if pct is None else "servoBar"
+        if self._bar.objectName() != name:
+            self._bar.setObjectName(name)
+            self._bar.style().unpolish(self._bar)
+            self._bar.style().polish(self._bar)

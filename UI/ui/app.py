@@ -13,7 +13,7 @@ from . import config as cfg
 from . import theme
 from .link import make_link
 from .screens import (StartScreen, TelemetryScreen, XsensScreen, BmsScreen,
-                      FlashScreen, CalibScreen)
+                      FoilsScreen, FlashScreen, CalibScreen)
 from .bms import make_bms
 from .flasher import TeensyFlasher
 from .logger import TelemetryLogger
@@ -31,18 +31,20 @@ class MainWindow(QStackedWidget):
         self.telemetry_screen = TelemetryScreen()
         self.xsens_screen = XsensScreen()
         self.bms_screen = BmsScreen()
+        self.foils_screen = FoilsScreen()
         self.flash_screen = FlashScreen()
         self.calib_screen = CalibScreen()
         self.addWidget(self.start_screen)
         self.addWidget(self.telemetry_screen)
         self.addWidget(self.xsens_screen)
         self.addWidget(self.bms_screen)
+        self.addWidget(self.foils_screen)
         self.addWidget(self.flash_screen)
         self.addWidget(self.calib_screen)
 
         # Pages de telemetrie (onglets), toutes alimentees par la trame
         self._pages = {"moteurs": self.telemetry_screen, "xsens": self.xsens_screen,
-                       "bms": self.bms_screen}
+                       "bms": self.bms_screen, "foils": self.foils_screen}
         self._streaming = False
 
         # BMS : derniere mesure, ajoutee a chaque trame du Teensy sous "bms"

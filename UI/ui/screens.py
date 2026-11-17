@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 
 from . import config as cfg
 from .widgets import (Card, RowCard, SpeedCard, Badge, EscCard, MultiCard, ChargeCard,
-                      set_status_style)
+                      FoilCard, set_status_style)
 
 CENTER = Qt.AlignmentFlag.AlignCenter
 
@@ -23,7 +23,37 @@ def _close_button(slot) -> QPushButton:
 
 
 # Pages de telemetrie, dans l'ordre des onglets
-PAGES = [("moteurs", "Moteurs"), ("xsens", "Xsens"), ("bms", "BMS")]
+PAGES = [("moteurs", "Moteurs"), ("xsens", "Xsens"), ("bms", "BMS"),
+         ("foils", cfg.FOILS_PAGE_LABEL)]
+
+
+class _FitLabel(QLabel):
+    """Texte entier s'il tient, sinon sans le mot « consigne », sinon
+    rien : jamais un bout de texte coupe. Avec 4 onglets il n'y a plus
+    la place : la consigne est dans la carte Vitesse de la page Moteurs.
+    Recalcule a chaque changement de texte et de largeur."""
+
+    def __init__(self, text=""):
+        super().__init__(text)
+        self._full = text
+
+    def set_full(self, text: str):
+        self._full = text
+        self._fit()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._fit()
+
+    def _fit(self):
+        w, fm = self.width(), self.fontMetrics()
+        for t in (self._full, self._full.replace("consigne ", "")):
+            if fm.horizontalAdvance(t) <= w:
+                if self.text() != t:
+                    self.setText(t)
+                return
+        if self.text():
+            self.setText("")
 
 
 class _PageBar(QHBoxLayout):
@@ -39,7 +69,7 @@ class _PageBar(QHBoxLayout):
             b.setFixedSize(112, 50)
             b.clicked.connect(lambda _=False, k=key: on_page(k))
             self.addWidget(b)
-        self.target = QLabel("--")
+        self.target = _FitLabel("--")
         self.target.setObjectName("barHint")
         # Si la place manque, c'est la consigne qui est rognee, jamais l'etat
         self.target.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -54,9 +84,12 @@ class _PageBar(QHBoxLayout):
         # Calibration du levier en cours (ex. lancee par la commande
         # secrete F/R) : on affiche la mesure a la place de la consigne.
         if cfg.calib_en_cours(d):
-            self.target.setText("CALIB " + cfg.calib_texte_mesure(d))
+            self._set_target("CALIB " + cfg.calib_texte_mesure(d))
         else:
-            self.target.setText(cfg.target_text(d))
+            self._set_target(cfg.target_text(d))
+
+    def _set_target(self, text: str):
+        self.target.set_full(text)
 
 
 def _stop_button(slot) -> QPushButton:
@@ -244,7 +277,7 @@ class TelemetryScreen(QWidget):
             c = EscCard("ESC %d" % i, cfg.esc_unit(), len(cfg.ESC_TEMPS))
             grid.addWidget(c, n // 2, cols[n % 2])
             self._esc_cards[i] = c
-        self._speed = SpeedCard(cfg.SPEED_LABEL_COURT, cfg.SPEED_UNIT)
+        self._speed = SpeedCard(cfg.SPEED_LABEL_COURT, cfg.SPEED_UNIT, sub_label="Consigne")
         self._speed.setFixedWidth(220)
         grid.addWidget(self._speed, 0, 1, max(1, (len(esc_ids) + 1) // 2), 1)
         grid.setColumnStretch(0, 1)
@@ -256,6 +289,7 @@ class TelemetryScreen(QWidget):
     def update_data(self, d: dict):
         self._bar.update_data(d)
         self._speed.set_value(cfg.speed_text(d))
+        self._speed.set_sub(cfg.target_short(d))
 
         texts = []
         for m in self._metrics:
@@ -467,6 +501,60 @@ class BmsScreen(QWidget):
         self._state.setText(text)
         set_status_style(self._state, ok)
         self._info.setText(cfg.bms_info(d))
+
+
+class FoilsScreen(QWidget):
+    """Page Foils : pour chaque foil, hauteur lue par le sonar, validite
+    du sonar et commande du servo. Ligne du bas : etat du controle et
+    sorties des PID."""
+    stopped = Signal()
+    page_requested = Signal(str)
+
+    def __init__(self, channels=None):
+        super().__init__()
+        channels = channels or cfg.FOIL_CHANNELS
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 12, 16, 12)
+        root.setSpacing(8)
+
+        self._bar = _PageBar("foils", self.page_requested.emit)
+        root.addLayout(self._bar)
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self._cards = []
+        for ch in channels:
+            c = FoilCard(ch.label, cfg.SONAR_UNIT)
+            row.addWidget(c, 1)
+            self._cards.append((ch, c))
+        root.addLayout(row, 1)
+
+        info = QFrame()
+        info.setObjectName("card")
+        lay = QHBoxLayout(info)
+        lay.setContentsMargins(12, 6, 12, 6)
+        self._state = QLabel("--")
+        set_status_style(self._state, None)
+        lay.addWidget(self._state)
+        lay.addStretch()
+        self._info = QLabel("--")
+        self._info.setObjectName("smallValue")
+        lay.addWidget(self._info)
+        root.addWidget(info)
+
+        root.addWidget(_stop_button(self.stopped.emit))
+
+    def update_data(self, d: dict):
+        self._bar.update_data(d)
+        for ch, card in self._cards:
+            card.set_value(cfg.sonar_text(d, ch.key))
+            card.set_sonar(*cfg.sonar_status(d, ch.key))
+            card.set_servo(cfg.servo_text(d, ch.key), cfg.servo_pct(d, ch.key))
+        text, ok = cfg.foils_status(d)
+        self._state.setText(text)
+        set_status_style(self._state, ok)
+        self._info.setText(cfg.foils_info(d))
 
 
 class CalibScreen(QWidget):

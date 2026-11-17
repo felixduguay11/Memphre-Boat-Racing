@@ -72,6 +72,8 @@ QLabel#escValue  {{ font-size:72px; font-weight:600; }}
 QLabel#speedValue {{ font-size:150px; font-weight:600; }}
 QLabel#speedUnit  {{ font-size:32px; color:{muted}; }}
 QLabel#speedMid   {{ font-size:80px; font-weight:600; }}
+QLabel#speedSubLabel {{ font-size:18px; color:{muted}; }}
+QLabel#speedSub   {{ font-size:26px; font-weight:600; }}
 QLabel#multiValue {{ font-size:34px; font-weight:600; }}
 QLabel#multiUnit  {{ font-size:18px; color:{muted}; }}
 QLabel#chargeValue {{ font-size:40px; font-weight:600; }}
@@ -83,6 +85,9 @@ QProgressBar#chargeOk::chunk   {{ background:{ok_fg};  border-radius:8px; }}
 QProgressBar#chargeMid::chunk  {{ background:{warn};   border-radius:8px; }}
 QProgressBar#chargeLow::chunk  {{ background:{danger}; border-radius:8px; }}
 QProgressBar#chargeNone::chunk {{ background:transparent; }}
+QProgressBar#servoBar::chunk   {{ background:{accent}; border-radius:8px; }}
+QProgressBar#servoNone::chunk  {{ background:transparent; }}
+QLabel#servoText  {{ font-size:22px; font-weight:500; }}
 QLabel#rowValue   {{ font-size:50px; font-weight:600; }}
 QLabel#smallValue {{ font-size:24px; font-weight:500; }}
 QLabel#statusOk   {{ font-size:19px; color:{ok_fg}; padding:2px 10px; }}

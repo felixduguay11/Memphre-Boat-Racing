@@ -207,6 +207,16 @@ def target_text(d: dict) -> str:
     return "consigne %d eRPM" % v
 
 
+def target_short(d: dict) -> str:
+    """Consigne sans le mot « consigne » (carte Vitesse de la page Moteurs).
+    Pendant une calibration du levier : la mesure du levier a la place."""
+    if calib_en_cours(d):
+        return "CALIB %s" % _pil(d).get("raw", "--")
+    if "target" not in d:
+        return "--"
+    return target_text(d).replace("consigne ", "")
+
+
 # ------------------------------------------------------------ calibration levier
 def _pil(d: dict) -> dict:
     return d.get("pil") or {}
@@ -305,6 +315,101 @@ def position_text(d: dict) -> str:
 def altitude_text(d: dict) -> str:
     g = _gps(d)
     return "%.1f m" % g["alt"] if g.get("alt_ok") else "--"
+
+
+# ------------------------------------------------------------ page Foils (sonars + servos)
+# Cles de la trame du firmware "Integration taille reel" (task_rpi.cpp) :
+#   "son":   {"av", "ag", "ad"}  distance des sonars, cm     (SONARS_ACTIFS)
+#   "sio":   {"av", "ag", "ad"}  sortie TOR, 1 = mesure valide
+#   "foils": {"on", "cmd": {av, ag, ad}, "h": {av, ag, ad}, "p", "r"}  (FOILS_ACTIFS)
+#            on = 1 en CONTROLE ; cmd = commande envoyee au servo (°) ;
+#            h = sortie du PID de hauteur, p / r = sorties PID pitch / roll.
+# Un bloc absent (option a 0 dans config.h) s'affiche "--" et
+# "absent de la trame" : jamais une valeur inventee.
+FOILS_PAGE_LABEL = "Foils"
+
+@dataclass(frozen=True)
+class FoilChannel:
+    key: str            # cle dans son / sio / foils.cmd
+    label: str          # titre de la carte
+
+
+# Ordre d'affichage, de gauche a droite (vue de l'arriere du bateau)
+FOIL_CHANNELS: List[FoilChannel] = [
+    FoilChannel("ag", "Arr. gauche"),
+    FoilChannel("av", "Avant"),
+    FoilChannel("ad", "Arr. droit"),
+]
+
+# Memes valeurs que SERVO_xxx_NEUTRAL / _MIN / _MAX de config.h (affichage)
+SERVO_NEUTRAL = {"av": 148, "ag": 148, "ad": 148}
+SERVO_MIN = {"av": 120, "ag": 120, "ad": 120}
+SERVO_MAX = {"av": 163, "ag": 163, "ad": 163}
+SONAR_UNIT = "cm"
+SERVO_UNIT = "°"
+
+
+def _son(d: dict) -> dict:
+    return d.get("son") or {}
+
+
+def _foils(d: dict) -> dict:
+    return d.get("foils") or {}
+
+
+def sonar_text(d: dict, key: str) -> str:
+    v = _son(d).get(key)
+    return "--" if v is None else "%.0f" % v
+
+
+def sonar_status(d: dict, key: str):
+    """(texte, ok) ; ok = None si l'information est absente."""
+    if "son" not in d:
+        return "Sonar : absent", None
+    io = (d.get("sio") or {}).get(key)
+    if io is None:
+        return "Sonar : --", None
+    return ("Sonar : OK", True) if io else ("Sonar : NON VALIDE", False)
+
+
+def servo_value(d: dict, key: str):
+    """Commande du servo en degres, ou None."""
+    return (_foils(d).get("cmd") or {}).get(key)
+
+
+def servo_text(d: dict, key: str) -> str:
+    v = servo_value(d, key)
+    if v is None:
+        return "Servo : --"
+    return "Servo %.0f°  (%+.0f)" % (v, v - SERVO_NEUTRAL.get(key, 0))
+
+
+def servo_pct(d: dict, key: str):
+    """Position de la commande entre min (0) et max (100), ou None."""
+    v = servo_value(d, key)
+    if v is None:
+        return None
+    lo, hi = SERVO_MIN.get(key, 0), SERVO_MAX.get(key, 180)
+    return max(0.0, min(100.0, (v - lo) * 100.0 / (hi - lo))) if hi > lo else None
+
+
+def foils_status(d: dict):
+    """(texte, ok) pour la ligne du bas de la page Foils."""
+    if "foils" not in d:
+        return "Foils : absent de la trame", None
+    if _foils(d).get("on"):
+        return "Foils : CONTROLE actif", True
+    return "Foils : servos au neutre", None
+
+
+def foils_info(d: dict) -> str:
+    """Sorties des PID pitch / roll (la hauteur se voit sur chaque servo)."""
+    f = _foils(d)
+    if not f:
+        return "sonars seuls" if "son" in d else "--"
+    parts = ["%s %+.1f" % (lab, f[k] + 0.0) for k, lab in (("p", "pitch"), ("r", "roll"))
+             if f.get(k) is not None]
+    return ("PID " + "   ".join(parts)) if parts else "--"
 
 
 # ------------------------------------------------------------ BMS (Bluetooth)

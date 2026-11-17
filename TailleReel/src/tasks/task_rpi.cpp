@@ -7,6 +7,8 @@
 //  sans modification. Champs ajoutés (objets imbriqués, aplatis
 //  par json_graph_ui.py en « imu.roll », « wd.pil.ok », ...) :
 //    arme, cmode, bat_cap (1 = plafond batterie basse actif), pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
+//  son{} / sio{} seulement si SONARS_ACTIFS, foils{} seulement si FOILS_ACTIFS
+//  (config.h). L'UI affiche « absent de la trame » sinon (page Foils).
 //  ⚠ "target" / "ramped" sont dans l'unité de MODE_COMMANDE
 //    (cmode : ERPM = eRPM, DUTY = ‰).
 //
@@ -180,10 +182,13 @@ static void sendTelemetry()
        s.xs.pos_valid, fin(s.xs.lat), fin(s.xs.lon), s.xs.alt_valid, fin(s.xs.altitude),
        (unsigned long)s.xs.pos_rejets);
 
-#if FOILS_ACTIFS
-    // --- Sonars + foils ---
+#if SONARS_ACTIFS
+    // --- Sonars : distance (cm) et sortie TOR de validité ---
     ap(",\"son\":{\"av\":%.1f,\"ag\":%.1f,\"ad\":%.1f}", fin(s.dist[0]), fin(s.dist[1]), fin(s.dist[2]));
-    ap(",\"sio\":{\"av\":%d,\"ag\":%d,\"ad\":%d}", s.io[0], s.io[1], s.io[2]);
+    ap(",\"sio\":{\"av\":%d,\"ag\":%d,\"ad\":%d}", s.io[0] ? 1 : 0, s.io[1] ? 1 : 0, s.io[2] ? 1 : 0);
+#endif
+#if FOILS_ACTIFS
+    // --- Foils : commande des servos (°), sorties PID hauteur / pitch / roll ---
     ap(",\"foils\":{\"on\":%d,\"cmd\":{\"av\":%.1f,\"ag\":%.1f,\"ad\":%.1f},"
        "\"h\":{\"av\":%.2f,\"ag\":%.2f,\"ad\":%.2f},\"p\":%.2f,\"r\":%.2f}",
        s.run == RunMode::CONTROLE ? 1 : 0,
