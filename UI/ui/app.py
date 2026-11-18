@@ -68,6 +68,17 @@ class MainWindow(QStackedWidget):
             page.page_requested.connect(self._show_page)
         self.link.telemetry.connect(self._on_telemetry)
 
+        # Cruise control : boutons de la page Moteurs, et signe de vie
+        # envoye tant que la telemetrie est affichee (sans lui, le Teensy
+        # sort du cruise).
+        # (lambda : l'envoi se fait dans le fil de l'UI, comme les autres commandes)
+        self.telemetry_screen.cruise_requested.connect(
+            lambda payload: self.link.send(payload))
+        self._cruise_vie = QTimer(self)
+        self._cruise_vie.setInterval(cfg.CRUISE_VIE_MS)
+        self._cruise_vie.timeout.connect(
+            lambda: self.link.send(cfg.CRUISE_VIE_PAYLOAD))
+
         self.setFixedSize(cfg.SCREEN_W, cfg.SCREEN_H)
         self.setWindowTitle(title)
         
@@ -134,7 +145,8 @@ class MainWindow(QStackedWidget):
         """Stop au Teensy, fermeture du log, sortie de l'application.
         Le lien est ferme par main() apres la boucle Qt."""
         self.logger.stop()
-        self.link.send(cfg.STOP_PAYLOAD)
+        self._cruise_vie.stop()
+        self.link.send(cfg.STOP_PAYLOAD)        # "stop" coupe aussi le cruise
         QApplication.quit()
 
     def _on_start(self, payload: dict):
@@ -143,9 +155,11 @@ class MainWindow(QStackedWidget):
         self._streaming = True
         self.setCurrentWidget(self.telemetry_screen)
         self.logger.start()
+        self._cruise_vie.start()
 
     def _on_stop(self):
-        self.link.send(cfg.STOP_PAYLOAD)
+        self._cruise_vie.stop()
+        self.link.send(cfg.STOP_PAYLOAD)        # "stop" coupe aussi le cruise
         self._streaming = False
         self.logger.stop()
         self.setCurrentWidget(self.start_screen)

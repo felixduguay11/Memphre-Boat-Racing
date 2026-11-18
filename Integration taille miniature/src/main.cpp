@@ -22,6 +22,7 @@
 #include "task_xsens.h"
 #include "task_state_machine.h"
 #include "task_propulsion.h"
+#include "task_sdlog.h"        // MODIF : journalisation carte SD
 
 SemaphoreHandle_t dataMutex;
 
@@ -39,6 +40,13 @@ void setup()
   xTaskCreate(Task_LectureSonar,   "Sonar",  STACK_SONAR, NULL, PRIO_SONAR, NULL);
   xTaskCreate(Task_RPi,            "RPi",    STACK_RPI,   NULL, PRIO_RPI,   NULL);
   xTaskCreate(Task_Propulsion,     "Prop",   STACK_PROP,  NULL, PRIO_PROP,  NULL);
+
+#if SD_LOG_ACTIF
+  // MODIF : journalisation SD (JSON Lines, un fichier par passage en RUN)
+  SDLog_init();
+  xTaskCreate(Task_SDLog_Echantillon, "SDech", STACK_SDLOG_ECH, NULL, PRIO_SDLOG_ECH, NULL);
+  xTaskCreate(Task_SDLog_Ecriture,    "SDecr", STACK_SDLOG_ECR, NULL, PRIO_SDLOG_ECR, NULL);
+#endif
 
   vTaskStartScheduler();
 }

@@ -101,7 +101,7 @@
 #define SERVO_ARRIERE_GAUCHE_MIN       100  //85 full dive
 #define SERVO_ARRIERE_GAUCHE_MAX       135  //135 full Lift  
 // SERVO ARRIERE DROIT
-#define SERVO_ARRIERE_DROIT_NEUTRAL    103  //90 neutre 
+#define SERVO_ARRIERE_DROIT_NEUTRAL    104  //90 neutre  (MODIF correctif A : 103 -> 104 = meme impulsion qu'avant, ~1534 us)
 #define SERVO_ARRIERE_DROIT_MIN        87  //70 full lift
 #define SERVO_ARRIERE_DROIT_MAX        120  //120 full dive
 
@@ -149,6 +149,10 @@
 #define H_KP_BAS                0.4f
 #define H_KI_BAS                0.1f
 #define H_KD_BAS                0.2f
+
+// MODIF (correctif C) : sortie hauteur max sur les foils arrière (unités foil).
+// Course arrière ≈ ±15-20 : on garde toujours ~7 unités pour le roulis.
+#define H_ARRIERE_OUT_MAX       8.0f
 //------------------------------------//
 
 
@@ -180,31 +184,34 @@
 
 //---------- ROLL CONTROLE ---------//
 #define R_REF_DEG             0.0f    // A changer par la consigne du volant !!!
-#define R_DEADBAND_ERR        2.0f
-#define R_DEADBAND_DERIV      0.3f    // 0.3/0.02 = 15deg/s
+// MODIF (correctif B) : zones mortes réduites
+#define R_DEADBAND_ERR        0.5f    // ancien : 2.0f
+#define R_DEADBAND_DERIV      0.02f   // 0.02/0.02 = 1deg/s (ancien : 0.3f = 15deg/s)
 #define R_INTEGRAL_MAX        20.0f
 #define R_INTEGRAL_MIN       -20.0f
 
+// MODIF (correctif B) : memes gains dans les 3 zones pour commencer
+// (plus de saut de gain a 7deg). Anciennes valeurs en commentaire.
 // Grande Erreur
 #define R_GRANDE_ERREUR       12.0f
-#define R_KP_HAUT             2.1f
-#define R_KI_HAUT             0.0f
-#define R_KD_HAUT             2.3f
+#define R_KP_HAUT             1.5f    // 2.1f
+#define R_KI_HAUT             0.2f    // 0.0f
+#define R_KD_HAUT             0.5f    // 2.3f
 
 // Moyenne Erreur
 #define R_MOYENNE_ERREUR      7.0f
-#define R_KP_MID              1.8f
-#define R_KI_MID              0.05f
-#define R_KD_MID              1.8f
+#define R_KP_MID              1.5f    // 1.8f
+#define R_KI_MID              0.2f    // 0.05f
+#define R_KD_MID              0.5f    // 1.8f
 
 // Petite Erreur
-#define R_KP_BAS              0.4f
-#define R_KI_BAS              0.1f
-#define R_KD_BAS              0.2f
+#define R_KP_BAS              1.5f    // 0.4f
+#define R_KI_BAS              0.2f    // 0.1f
+#define R_KD_BAS              0.5f    // 0.2f
 //------------------------------------//
 
 //--------------- VIRAGE Roll ------------------//
-#define R_REF_FROM_RUDDER      1        // 0 = consigne fixe R_REF_DEG
+#define R_REF_FROM_RUDDER      0        // 0 = consigne fixe R_REF_DEG  (MODIF correctif B : 0 pendant les essais de stabilite, ancien : 1)
 #define R_REF_MAX_DEG          8.0f     // gite max, barre a fond pleine vitesse
 #define R_REF_SENS             1.0f     // -1.0f si le bateau penche du mauvais cote
 #define R_REF_ALPHA            0.08f    // filtre sur la consigne (~250 ms a 50 Hz)
@@ -279,7 +286,7 @@
 //#define PIN_12                      12
 #define LED                         13
 #define Analog_Sonar_Avant          14
-#define Analog_Sonar_Arriere_Gauche 15
+#define Analog_Sonar_Arriere_Gauche 15   // NOTE : sonar arriere unique, CENTRE (nom historique)
 //#define Analog_Sonar_Arriere_Droit  16
 //#define PIN_17                      17
 //#define PIN_18                      18
@@ -307,6 +314,36 @@
 #define I_F_R                       40
 //#define PIN_41                      41
 //------------------------------------//
+
+//------------- JOURNALISATION SD (Task_SDLog, carte du Teensy) -------------//
+// Fichiers JSON Lines (une trame JSON par ligne) : run_0001.jsonl, run_0002.jsonl...
+// Un nouveau fichier a chaque passage en RUN, ferme a la sortie de RUN.
+// Compatible avec UI/analyse/json_graph_ui.py.
+#define SD_LOG_ACTIF            1       // 0 = pas de journalisation SD
+#define PERIODE_SDLOG_MS        50      // 20 Hz
+#define STACK_SDLOG_ECH         2048    // tache d'echantillonnage (8KB)
+#define STACK_SDLOG_ECR         2048    // tache d'ecriture SD (8KB)
+#define PRIO_SDLOG_ECH          2       // echantillonne a heure fixe
+#define PRIO_SDLOG_ECR          1       // ecriture SD (lente, peut bloquer ~100-250 ms)
+#define SDLOG_TAMPON_OCTETS     32768   // file RAM entre les 2 taches (~3 s de donnees)
+#define SDLOG_BLOC_OCTETS       8192    // bloc ecrit d'un coup sur la SD
+#define SDLOG_LIGNE_MAX         1024    // taille max d'une trame JSON
+#define SDLOG_FLUSH_MS          1000    // donnees perdues max si coupure de courant
+#define SDLOG_RETRY_MS          2000    // nouvel essai si carte absente / en erreur
+//----------------------------------------------------------------------------//
+
+
+//------------- XSENS : GPS / VITESSE (porte de TailleReel) -------------//
+// Rejet des vitesses / positions aberrantes (paquets corrompus). Apres
+// GPS_REJETS_RESYNC rejets consecutifs, la valeur est acceptee (vrai saut).
+#define XSENS_RX_BUFFER          1024    // octets ajoutes au buffer RX de Serial4
+#define XSENS_DONNEES_TIMEOUT_MS 200     // aucun paquet depuis -> donnees perimees
+#define GPS_VITESSE_MAX_KMH      80.0f   // au-dela : rejet
+#define GPS_ACCEL_MAX_KMH_S      25.0f   // variation max plausible (km/h par seconde)
+#define GPS_SAUT_MIN_KMH         2.0f    // tolerance fixe (bruit)
+#define GPS_POS_SAUT_MAX_M       50.0f   // saut de position max entre deux trames
+#define GPS_REJETS_RESYNC        20      // rejets consecutifs -> re-synchronisation
+//-----------------------------------------------------------------------//
 
 #endif /* CONFIG_H */
 

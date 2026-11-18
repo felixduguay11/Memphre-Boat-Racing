@@ -232,6 +232,116 @@ def calib_resultat(d: dict):
     return CALIB_RESULTATS.get(n, "resultat %d" % n), (None if n == 0 else n == 1)
 
 
+# ------------------------------------------------------------ cruise control
+# Case « Cruise control » en bas a droite de la page Moteurs :
+#   cruise arrete -> pop-up a 3 choix : ERPM / vitesse GPS / Annuler
+#   cruise actif  -> arret du cruise (la telemetrie continue ; le Teensy
+#                    met la consigne a 0 jusqu'au levier au repos)
+# Etat RUN·CRUISE de la machine d'etat du Teensy : il n'accepte la
+# demande qu'en RUN·FORWARD (levier pousse) et coupe le cruise si le
+# levier revient au repos.
+# Les cibles (4600 eRPM, 15 km/h) se reglent dans config.h du Teensy
+# (CRUISE_ERPM, CRUISE_VITESSE_KMH) ; il les renvoie dans la trame :
+#   "cr": {"m": 0 off / 1 ERPM / 2 vitesse, "t": duree en ms,
+#          "fin": raison de sortie, "erpm": cible, "kmh": cible}
+CRUISE_OFF, CRUISE_ERPM, CRUISE_VITESSE = 0, 1, 2
+
+CRUISE_PAYLOADS = {
+    CRUISE_ERPM:    {"cmd": "cruise_erpm"},
+    CRUISE_VITESSE: {"cmd": "cruise_vitesse"},
+}
+CRUISE_OFF_PAYLOAD = {"cmd": "cruise_off"}
+
+# Signe de vie, envoye en continu tant que la telemetrie est affichee.
+# Sans lui pendant CRUISE_UI_TIMEOUT_MS (config.h, 1 s), le Teensy sort
+# du cruise : ecran fige, UI fermee ou USB debranche.
+CRUISE_VIE_PAYLOAD = {"cmd": "cruise_vie"}
+CRUISE_VIE_MS = 200
+
+# Le pop-up de choix se ferme seul apres ce temps (ou si le bateau
+# n'est plus en RUN·FORWARD).
+CRUISE_CHOIX_S = 15
+
+# Raison de la derniere sortie / du dernier refus ("cr": {"fin": n}),
+# memes numeros que CRUISE_FIN_* du Teensy (task_state_machine.h).
+CRUISE_FINS = {
+    0: "",
+    1: "arrete a l'ecran",
+    2: "levier au repos",
+    3: "switch F/R",
+    4: "vitesse GPS perdue",
+    5: "ecran muet",
+    6: "switch ON a OFF",
+    7: "erreur critique",
+    8: "refuse : levier pas en FORWARD",
+    9: "refuse : pas de vitesse GPS",
+}
+CRUISE_REFUS = (8, 9)
+CRUISE_REFUS_AFFICHE_S = 4.0    # un refus reste affiche ce temps apres le choix
+# Sorties apres lesquelles le Teensy tient la consigne a 0 jusqu'au
+# levier au repos (en IDLE / ARRET, le rearmement est deja affiche).
+CRUISE_SORTIES_REARME = (1, 2, 3, 4, 5)
+CRUISE_TEXTE_REARME = "ramener le levier au repos"
+
+# Etats (cle "run") depuis lesquels le Teensy accepte le cruise.
+CRUISE_RUN_OK = {"FORWARD", "CONTROLE"}
+
+
+def _cr(d: dict) -> dict:
+    return d.get("cr") or {}
+
+
+def cruise_mode(d: dict) -> int:
+    return int(_cr(d).get("m", 0))
+
+
+def cruise_possible(d: dict, mode: int = CRUISE_ERPM) -> bool:
+    """Le choix sert a quelque chose : firmware avec cruise, RUN·FORWARD,
+    et une vitesse GPS valide pour le cruise vitesse."""
+    if "cr" not in d or d.get("mode") != "RUN" or d.get("run") not in CRUISE_RUN_OK:
+        return False
+    return mode != CRUISE_VITESSE or speed_text(d) != "--"
+
+
+def cruise_cible(d: dict, mode: int) -> str:
+    """Cible du mode, telle que reglee dans config.h du Teensy."""
+    c = _cr(d)
+    if mode == CRUISE_ERPM:
+        return "%d eRPM" % c["erpm"] if "erpm" in c else "-- eRPM"
+    return "%g km/h" % c["kmh"] if "kmh" in c else "-- km/h"
+
+
+def cruise_bouton_texte(d: dict) -> str:
+    """Texte de la case : « Cruise control », ou le mode actif."""
+    m = cruise_mode(d)
+    return "Cruise control" if m == CRUISE_OFF else "ON · " + cruise_cible(d, m)
+
+
+def cruise_timer_text(d: dict) -> str:
+    """Duree de l'activation en min:s (figee apres la sortie)."""
+    c = _cr(d)
+    if "t" not in c:
+        return "--:--"
+    s = int(c["t"]) // 1000
+    return "%d:%02d" % (s // 60, s % 60)
+
+
+def cruise_fin(d: dict) -> int:
+    return int(_cr(d).get("fin", 0))
+
+
+def cruise_fin_text(d: dict) -> str:
+    n = cruise_fin(d)
+    return CRUISE_FINS.get(n, "fin %d" % n)
+
+
+def cruise_attend_rearme(d: dict) -> bool:
+    """Apres une sortie du cruise : consigne a 0 tant que le levier
+    n'est pas revenu au repos (cle "arme" du Teensy)."""
+    return (cruise_mode(d) == CRUISE_OFF and cruise_fin(d) in CRUISE_SORTIES_REARME
+            and d.get("mode") == "RUN" and not int(d.get("arme", 1)))
+
+
 # ------------------------------------------------------------ page Xsens
 # Cles de la trame du firmware "Integration taille reel" :
 #   "imu": {"ok", "frais", "roll", "pitch", "yaw", "vok", "v_kmh"}

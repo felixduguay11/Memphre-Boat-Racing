@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """screens.py — les ecrans. Ils lisent config.py, ils ne codent rien en dur."""
 
+import time
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -9,6 +11,7 @@ from PySide6.QtWidgets import (
 
 from . import config as cfg
 from .widgets import Card, RowCard, SpeedCard, Badge, EscCard, set_status_style
+from .cruise_popup import CruisePopup
 
 CENTER = Qt.AlignmentFlag.AlignCenter
 
@@ -193,10 +196,12 @@ class FlashScreen(QWidget):
 
 
 class TelemetryScreen(QWidget):
-    """Page Moteurs : batterie / courant / puissance et une carte par ESC.
+    """Page Moteurs : batterie / courant / puissance, une carte par ESC,
+    et en bas Stop, le timer du cruise et la case Cruise control.
     Cartes generees depuis cfg."""
     stopped = Signal()
     page_requested = Signal(str)
+    cruise_requested = Signal(dict)     # commande a envoyer au Teensy
 
     def __init__(self, metrics=None, esc_ids=None, columns: int = None):
         super().__init__()
@@ -239,11 +244,95 @@ class TelemetryScreen(QWidget):
         grid.setColumnStretch(2, 1)
         root.addLayout(grid, 1)     # les cartes ESC prennent la hauteur libre
 
-        root.addWidget(_stop_button(self.stopped.emit))
+        # Rangee du bas : Stop | timer du cruise | case Cruise control
+        bas = QHBoxLayout()
+        bas.setSpacing(8)
+        stop = _stop_button(self.stopped.emit)
+        stop.setFixedWidth(150)
+        bas.addWidget(stop)
+        self._cruise_mode = cfg.CRUISE_OFF      # etat renvoye par le Teensy
+        self._cruise_appui = 0.0                # dernier choix (affichage d'un refus)
+        self._dernier = {}                      # derniere trame (ouverture du pop-up)
+        col = QVBoxLayout()
+        col.setSpacing(0)
+        self._cruise_timer = QLabel("--:--")
+        self._cruise_timer.setObjectName("cruiseTimer")
+        self._cruise_timer.setAlignment(CENTER)
+        self._cruise_info = QLabel("")
+        self._cruise_info.setObjectName("cruiseInfo")
+        self._cruise_info.setAlignment(CENTER)
+        # Largeur fixee par la rangee, jamais par le texte
+        self._cruise_info.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        col.addWidget(self._cruise_timer)
+        col.addWidget(self._cruise_info)
+        bas.addLayout(col, 1)
+        self._cruise_btn = QPushButton("Cruise control")
+        self._cruise_btn.setObjectName("cruise")
+        self._cruise_btn.setFixedWidth(260)
+        self._cruise_btn.setEnabled(False)
+        self._cruise_btn.clicked.connect(self._on_cruise)
+        bas.addWidget(self._cruise_btn)
+        root.addLayout(bas)
+
+        self._popup = CruisePopup(self)
+        self._popup.choisi.connect(self._on_choix)
+
+    def _on_cruise(self):
+        """Cruise actif : arret (la telemetrie continue). Sinon : pop-up
+        de choix du mode."""
+        if self._cruise_mode != cfg.CRUISE_OFF:
+            self.cruise_requested.emit(dict(cfg.CRUISE_OFF_PAYLOAD))
+        else:
+            self._popup.ouvrir(self._dernier)
+
+    def _on_choix(self, mode: int):
+        self._cruise_appui = time.monotonic()
+        self.cruise_requested.emit(dict(cfg.CRUISE_PAYLOADS[mode]))
+
+    def _update_cruise(self, d: dict):
+        self._dernier = d
+        actif = cfg.cruise_mode(d)
+        self._cruise_mode = actif
+        b = self._cruise_btn
+        b.setText(cfg.cruise_bouton_texte(d))
+        # Actif : toujours cliquable (arret). Arrete : il faut RUN·FORWARD.
+        b.setEnabled(actif != cfg.CRUISE_OFF or cfg.cruise_possible(d))
+        self._set_name(b, "cruiseOn" if actif else "cruise")
+        if actif:
+            self._popup.fermer()
+        else:
+            self._popup.maj(d)
+        self._cruise_timer.setText(cfg.cruise_timer_text(d))
+        self._set_name(self._cruise_timer, "cruiseTimerOn" if actif else "cruiseTimer")
+        rearme = cfg.cruise_attend_rearme(d)
+        if actif:
+            info = "appuyer sur ON pour arreter"
+        elif rearme:
+            info = cfg.CRUISE_TEXTE_REARME      # consigne a 0 jusque-la
+        elif cfg.cruise_fin(d) in cfg.CRUISE_REFUS:
+            # Un refus n'est affiche que juste apres le choix dans le pop-up
+            recent = time.monotonic() - self._cruise_appui < cfg.CRUISE_REFUS_AFFICHE_S
+            info = cfg.cruise_fin_text(d) if recent else ""
+        else:
+            info = cfg.cruise_fin_text(d)
+        self._cruise_info.setText(info)
+        self._set_name(self._cruise_info, "cruiseInfoRearme" if rearme else "cruiseInfo")
+
+    def hideEvent(self, ev):
+        self._popup.fermer()                    # changement d'onglet, Stop
+        super().hideEvent(ev)
+
+    @staticmethod
+    def _set_name(w, name: str):
+        if w.objectName() != name:              # re-polish seulement si ca change
+            w.setObjectName(name)
+            w.style().unpolish(w)
+            w.style().polish(w)
 
     def update_data(self, d: dict):
         self._bar.update_data(d)
         self._speed.set_value(cfg.speed_text(d))
+        self._update_cruise(d)
 
         for m, card in self._metrics:
             try:

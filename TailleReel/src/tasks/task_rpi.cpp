@@ -6,7 +6,10 @@
 //  hot, esc[]) → l'UI (Real_V1_UI) et l'outil d'analyse marchent
 //  sans modification. Champs ajoutés (objets imbriqués, aplatis
 //  par json_graph_ui.py en « imu.roll », « wd.pil.ok », ...) :
-//    arme, cmode, pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
+//    arme, cmode, cr{}, pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
+//  cr{} = cruise control : m (0 off, 1 ERPM, 2 vitesse), t (durée de
+//    l'activation, ms), fin (raison de sortie / refus), erpm et kmh
+//    (cibles de config.h, affichées dans le pop-up de l'UI).
 //  ⚠ "target" / "ramped" sont dans l'unité de MODE_COMMANDE
 //    (cmode : ERPM = eRPM, DUTY = ‰).
 //
@@ -59,6 +62,7 @@ static const char* runStr(RunMode r)
         case RunMode::FORWARD:  return "FORWARD";
         case RunMode::REVERSE:  return "REVERSE";
         case RunMode::CONTROLE: return "CONTROLE";
+        case RunMode::CRUISE:   return "CRUISE";
         default:                return "NEUTRAL";
     }
 }
@@ -82,6 +86,7 @@ static void ap(const char* fmt, ...)
 // ─── Copie locale de Shared Data ───
 struct Snapshot {
     ControlMode mode;  RunMode run;  bool arme;
+    uint8_t cruise;  uint32_t cruise_ms;  uint8_t cruise_fin;
     int   target;  float ramped;
     PiloteData pil;
     EscData    esc[NB_VESC];
@@ -98,6 +103,7 @@ static void lireSnapshot(Snapshot &s)
     if (xSemaphoreTake(dataMutex, portMAX_DELAY))
     {
         s.mode   = SM_mode;       s.run = SM_run;   s.arme = SM_arme;
+        s.cruise = SM_cruise;     s.cruise_ms = SM_cruise_ms;   s.cruise_fin = SM_cruise_fin;
         s.target = Prop_target;   s.ramped = Prop_ramped;
         s.pil    = Pilote_data;
         for (int k = 0; k < NB_VESC; k++) s.esc[k] = ESC_data[k];
@@ -150,6 +156,11 @@ static void sendTelemetry()
     }
     ap("],\"arme\":%d,\"cmode\":\"%s\"", s.arme ? 1 : 0, CMD_NOM);
 
+    // --- Cruise control ---
+    ap(",\"cr\":{\"m\":%d,\"t\":%lu,\"fin\":%d,\"erpm\":%d,\"kmh\":%.1f}",
+       s.cruise, (unsigned long)s.cruise_ms, s.cruise_fin,
+       (int)CRUISE_ERPM, (double)CRUISE_VITESSE_KMH);
+
     // --- Pilote ---
     // brut : switchs avant anti-rebond (bits 0 ON, 1 F/R, 2 CTL, 3 START)
     ap(",\"pil\":{\"on\":%d,\"fr\":%d,\"ctl\":%d,\"esc\":%d,\"lev\":%d,\"raw\":%d,"
@@ -185,7 +196,7 @@ static void sendTelemetry()
     ap(",\"sio\":{\"av\":%d,\"ag\":%d,\"ad\":%d}", s.io[0], s.io[1], s.io[2]);
     ap(",\"foils\":{\"on\":%d,\"cmd\":{\"av\":%.1f,\"ag\":%.1f,\"ad\":%.1f},"
        "\"h\":{\"av\":%.2f,\"ag\":%.2f,\"ad\":%.2f},\"p\":%.2f,\"r\":%.2f}",
-       s.run == RunMode::CONTROLE ? 1 : 0,
+       (xEventGroupGetBits(egEtat) & EVT_CONTROLE) ? 1 : 0,    // actifs aussi en CRUISE
        fin(s.cmd[0]), fin(s.cmd[1]), fin(s.cmd[2]),
        fin(s.h[0]), fin(s.h[1]), fin(s.h[2]), fin(s.p_out), fin(s.r_out));
 #endif
@@ -231,6 +242,14 @@ static void handlePiCommand(const char* line)
     else if (strstr(p, "calib")) {
         xEventGroupSetBits(egEtat, EVT_CALIB_DEBUT);
     }
+    // Cruise control → machine d'état (EVT_CRUISE_*). Toute commande
+    // "cruise_*" vaut signe de vie de l'UI ; "cruise_vie" n'est que ça.
+    else if (strstr(p, "cruise_")) {
+        Cruise_vie_ms = millis();
+        if      (strstr(p, "cruise_erpm"))    xEventGroupSetBits(egEtat, EVT_CRUISE_ERPM);
+        else if (strstr(p, "cruise_vitesse")) xEventGroupSetBits(egEtat, EVT_CRUISE_VIT);
+        else if (strstr(p, "cruise_off"))     xEventGroupSetBits(egEtat, EVT_CRUISE_OFF);
+    }
     else if (strstr(p, "start")) {
         streaming = true;
         // Les gains PID arriveront ici plus tard (clé "pid").
@@ -239,6 +258,8 @@ static void handlePiCommand(const char* line)
         streaming  = false;
         lastBeatMs = millis();
         // NOTE : "stop" arrête seulement la télémétrie, pas les moteurs.
+        // Exception : l'écran n'affiche plus rien → sortie du cruise.
+        xEventGroupSetBits(egEtat, EVT_CRUISE_OFF);
     }
 }
 

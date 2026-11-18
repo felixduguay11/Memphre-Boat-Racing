@@ -8,9 +8,12 @@ Utilisation (sur le PC, avec matplotlib et numpy) :
     python analyse_logs.py session_0024_20261023-142126.jsonl
     python analyse_logs.py C:\\Users\\feldu\\memphre_logs          # prend la session la plus récente
     python analyse_logs.py session.jsonl --debut 1700 --fin 1900    # zoom (secondes depuis le début du log)
-    python analyse_logs.py session.jsonl --show                     # ouvre aussi les fenêtres
+    python analyse_logs.py session.jsonl --show                     # affiche toutes les pages
 
 Produit, dans <session>_graphs/ (à côté du log, ou --out) :
+    0_moteurs.png       régime (consigne vs réel), courant moteur, puissance batterie —
+                        affiché à l'écran à la fin (--sans-fenetre pour ne rien afficher,
+                        --show pour afficher toutes les pages)
     1_conduite.png      levier, consigne vs régime réel, vitesse GPS
     2_puissance.png     courant moteur, courant batterie, tension, puissance
     3_thermique.png     température FET / moteur, échauffement (I²)
@@ -20,8 +23,8 @@ Produit, dans <session>_graphs/ (à côté du log, ou --out) :
     resume.txt          chiffres clés (max, énergie, temps au plafond de courant, erreurs)
 
 Les zones grisées = mode RUN. Régime en tr/min = |eRPM| / POLE_PAIRS.
-Les périodes inactives de plus d'une minute (moteurs arrêtés, bateau immobile,
-hors RUN) sont retirées des graphiques temporels : un trait gris pointillé
+Les périodes où les deux moteurs sont arrêtés (plus de 5 s) sont retirées des
+graphiques temporels : un trait gris pointillé
 marque chaque coupure, avec la durée retirée. L'axe garde le temps réel.
 --complet garde tout. Le résumé est toujours calculé sur le log complet.
 """
@@ -235,20 +238,17 @@ def charger(path, debut=None, fin=None):
 
 
 # ------------------------------------------------------------ coupure des temps morts
-INACTIF_MIN_S = 60       # on ne coupe que les temps morts plus longs que ça
-MARGE_S = 15             # contexte gardé avant et après chaque période active
+INACTIF_MIN_S = 5        # on coupe tout arrêt des moteurs plus long que ça
+MARGE_S = 2              # contexte gardé avant et après chaque période où ça tourne
+RPM_TOURNE = 50          # tr/min : au-dessus, on considère que le moteur tourne
 
 
 def actif(D):
-    """True quand il se passe quelque chose : RUN, moteur qui tourne, courant,
-    bateau qui avance, ou passage en ARRET."""
+    """True quand au moins un moteur tourne."""
     with np.errstate(invalid="ignore"):
-        a = D["mode"] == "RUN"
+        a = np.zeros(len(D["t_s"]), bool)
         for n in ("10", "11"):
-            a |= np.nan_to_num(D["rpm" + n]) > 30
-            a |= np.nan_to_num(D["imot" + n]) > 5
-        a |= np.nan_to_num(D["v_kmh"]) > 2
-    a |= (D["mode"] == "ARRET") & np.roll(D["mode"] != "ARRET", 1)
+            a |= np.nan_to_num(D["rpm" + n]) > RPM_TOURNE
     return a
 
 
@@ -323,33 +323,72 @@ def compacter(D):
     return C
 
 
-def axe_temps_reel(ax, D):
-    """Graduations rondes en temps réel sur l'axe compressé + marques de coupure."""
-    import matplotlib.ticker as mt
-    if "t_reel" not in D:
-        return
-    tc, tr = D["t"], D["t_reel"]
+def _segments(D):
+    """[(début, fin)] des morceaux continus de l'axe compressé (indices)."""
+    tr = D.get("t_reel", D["t"])
     ok = np.isfinite(tr)
-    # Segments continus (séparés par les lignes vides)
     coupe = np.flatnonzero(~ok)
     bornes = [0] + coupe.tolist() + [len(tr)]
     segs = [(a + (a > 0), b) for a, b in zip(bornes[:-1], bornes[1:])]
-    segs = [(a, b) for a, b in segs if b - a > 0]
-    long_c = tc[-1] - tc[0]
-    pas = next((p for p in (0.25, 0.5, 1, 2, 5, 10, 15, 30, 60) if long_c / p <= 10), 120)
-    pos, lab = [], []
-    for a, b in segs:
-        r0, r1 = tr[a], tr[b - 1]
-        rs = np.arange(np.ceil(r0 / pas) * pas, r1 + 1e-9, pas)
-        if not len(rs):                           # segment court : graduer son début
-            rs = [r0]
-        for r in rs:
-            pos.append(tc[a] + (r - r0))
-            lab.append(("%.1f" % r).rstrip("0").rstrip("."))
-    ax.xaxis.set_major_locator(mt.FixedLocator(pos))
-    ax.xaxis.set_major_formatter(mt.FixedFormatter(lab))
-    for xc, _ in D["coupures"]:
+    return [(a, b) for a, b in segs if b - a > 0]
+
+
+def axe_temps_reel(ax, D):
+    """Graduations rondes en temps réel (min:s) sur l'axe compressé, recalculées
+    au zoom, + marques de coupure."""
+    import matplotlib.ticker as mt
+    tc, tr = D["t"], D.get("t_reel", D["t"])
+    segs = _segments(D)
+    PAS = (1 / 12, 1 / 6, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60)   # min (5 s … 1 h)
+
+    class Locateur(mt.Locator):
+        pas = 1
+
+        def __call__(self):
+            x0, x1 = sorted(self.axis.get_view_interval())
+            Locateur.pas = next((p for p in PAS if (x1 - x0) / p <= 11), 120)
+            pos = []
+            for a, b in segs:
+                c0, c1 = tc[a], tc[b - 1]
+                if c1 < x0 or c0 > x1:
+                    continue
+                r0 = tr[a]
+                lo, hi = r0 + max(x0 - c0, 0), r0 + min(x1, c1) - c0
+                rs = np.arange(np.ceil(lo / Locateur.pas - 1e-9) * Locateur.pas, hi + 1e-9,
+                               Locateur.pas)
+                if not len(rs):                   # segment court : graduer son milieu (5 s près)
+                    milieu = round((lo + hi) / 2 * 12) / 12
+                    x = c0 + (milieu - r0)
+                    if not pos or x - pos[-1] > 0.4 * Locateur.pas:
+                        pos.append(x)
+                for r in rs:
+                    pos.append(c0 + (r - r0))
+            return pos
+
+    def fmt(x, _pos):
+        for a, b in segs:
+            if tc[a] - 1e-6 <= x <= tc[b - 1] + 1e-6:
+                r = tr[a] + (x - tc[a])
+                break
+        else:
+            return ""
+        if Locateur.pas >= 1:
+            return "%d" % round(r)
+        sec = int(round(r * 60))
+        return "%d:%02d" % (sec // 60, sec % 60)
+
+    ax.xaxis.set_major_locator(Locateur())
+    ax.xaxis.set_major_formatter(mt.FuncFormatter(fmt))
+    for xc, _ in D.get("coupures", []):
         ax.axvline(xc, color=C_ENCRE2, lw=0.9, ls=(0, (2, 2)), zorder=1)
+
+
+def echelle_fine(ax, nbins=6):
+    """Graduations rondes sur l'axe vertical (peu nombreuses, chiffres gros) + grille secondaire."""
+    import matplotlib.ticker as mt
+    ax.yaxis.set_major_locator(mt.MaxNLocator(nbins=nbins, steps=[1, 2, 2.5, 5, 10]))
+    ax.yaxis.set_minor_locator(mt.AutoMinorLocator(2))
+    ax.grid(True, which="minor", axis="y", color=C_GRILLE, linewidth=0.35)
 
 
 def etiqueter_coupures(ax, D):
@@ -357,7 +396,7 @@ def etiqueter_coupures(ax, D):
     for xc, retire in D.get("coupures", []):
         txt = "−%.0f min" % retire if retire >= 1.5 else "−%.0f s" % (retire * 60)
         ax.text(xc, 0.5, txt, transform=ax.get_xaxis_transform(), rotation=90,
-                ha="center", va="center", fontsize=7, color=C_ENCRE2, zorder=5,
+                ha="center", va="center", fontsize=9, color=C_ENCRE2, zorder=5,
                 bbox=dict(boxstyle="square,pad=0.15", fc="white", ec="none"))
 
 
@@ -365,16 +404,23 @@ def etiqueter_coupures(ax, D):
 def style():
     import matplotlib.pyplot as plt
     plt.rcParams.update({
-        "figure.dpi": 110, "savefig.dpi": 130, "font.size": 9,
-        "axes.edgecolor": C_GRILLE, "axes.labelcolor": C_ENCRE2, "axes.titlesize": 10,
+        "figure.dpi": 100, "savefig.dpi": 120, "font.size": 11,
+        "xtick.labelsize": 18, "ytick.labelsize": 18, "axes.labelsize": 18,
+        "axes.edgecolor": C_GRILLE, "axes.labelcolor": C_ENCRE2, "axes.titlesize": 12.5,
         "axes.titleweight": "bold", "axes.titlecolor": C_ENCRE, "axes.titlelocation": "left",
         "axes.grid": True, "grid.color": C_GRILLE, "grid.linewidth": 0.6,
         "xtick.color": C_ENCRE2, "ytick.color": C_ENCRE2,
         "axes.spines.top": False, "axes.spines.right": False,
-        "lines.linewidth": 1.1, "legend.fontsize": 8, "legend.frameon": True,
+        "lines.linewidth": 1.1, "legend.fontsize": 11.5, "legend.frameon": True,
         "legend.framealpha": 0.9, "legend.edgecolor": "none", "legend.facecolor": "white",
     })
     return plt
+
+
+def legende(ax, **kw):
+    """Légende à droite, à l'extérieur du graphique : ne cache jamais une courbe."""
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), borderaxespad=0.0,
+              ncol=1, frameon=False, handlelength=1.8, **kw)
 
 
 def zones_run(ax, D):
@@ -396,19 +442,23 @@ def zones_run(ax, D):
         ax.axvline(t[k], color=C_ALERTE, lw=1, ls="--", zorder=1)
 
 
+TITRE_X_POS = 0.34       # position du titre de l'axe du temps (0 = gauche, 1 = droite)
+
+
 def page(plt, n, titre, D, hauteur=2.0):
-    fig, axs = plt.subplots(n, 1, figsize=(12, hauteur * n + 0.8), sharex=True)
+    fig, axs = plt.subplots(n, 1, figsize=(15, hauteur * n + 1.0), sharex=True)
     axs = np.atleast_1d(axs)
-    fig.suptitle(titre, x=0.01, ha="left", fontsize=12, fontweight="bold", color=C_ENCRE)
+    fig.suptitle(titre, x=0.01, ha="left", fontsize=14, fontweight="bold", color=C_ENCRE)
     for ax in axs:
         zones_run(ax, D)
         axe_temps_reel(ax, D)
         etiqueter_coupures(ax, D)
     if D.get("coupures"):
-        axs[-1].set_xlabel("temps réel (min) — temps morts retirés (%.0f min, traits pointillés)"
-                           % D["retire_min"])
+        txt = ("temps réel (min)")
     else:
-        axs[-1].set_xlabel("temps (min)")
+        txt = "temps (min)"
+    # Titre de l'axe un peu à gauche du centre (≈ 34 % de la largeur du graphique)
+    axs[-1].set_xlabel(txt, x=TITRE_X_POS, ha="center")
     return fig, axs
 
 
@@ -417,7 +467,7 @@ def deux_esc(ax, D, cle, label, unite):
     ax.plot(D["t"], D[cle + "11"], color=C_ESC11, label="ESC 11")
     ax.set_title(label)
     ax.set_ylabel(unite)
-    ax.legend(loc="upper left", ncol=2)
+    legende(ax)
 
 
 def roulant(x, n):
@@ -440,7 +490,7 @@ def p_conduite(plt, D, nom):
     ax[1].plot(D["t"], D["rpm11"], color=C_ESC11, label="ESC 11 réel")
     ax[1].set_title("Régime moteur : consigne vs réel (écart = moteur qui ne suit pas)")
     ax[1].set_ylabel("tr/min")
-    ax[1].legend(loc="upper left", ncol=3)
+    legende(ax[1])
 
     ax[2].plot(D["t"], D["v_kmh"], color=C_ENCRE)
     ax[2].set_title("Vitesse GPS")
@@ -453,7 +503,7 @@ def p_puissance(plt, D, nom):
     deux_esc(ax[0], D, "imot", "Courant moteur (couple) — plateau = limite Motor Current Max", "A")
     deux_esc(ax[1], D, "iin", "Courant batterie par ESC", "A")
     ax[1].plot(D["t"], D["ibat"], color=C_TROIS, lw=1.4, label="total")
-    ax[1].legend(loc="upper left", ncol=3)
+    legende(ax[1])
     ax[2].plot(D["t"], D["vbat"], color=C_ENCRE)
     ax[2].set_title("Tension batterie (creux = chute sous charge)")
     ax[2].set_ylabel("V")
@@ -476,15 +526,15 @@ def p_thermique(plt, D, nom):
     ax[i].plot(D["t"], roulant(D["imot11"] ** 2, w) / 1000, color=C_ESC11, label="ESC 11")
     ax[i].set_title("Échauffement : I² moteur moyen sur 10 s (chaleur ∝ I²) — courbes égales = même charge")
     ax[i].set_ylabel("kA²")
-    ax[i].legend(loc="upper left", ncol=2)
+    legende(ax[i])
     return fig
 
 
 def p_correlations(plt, D, nom):
-    fig, ax = plt.subplots(2, 2, figsize=(12, 8.5))
-    fig.suptitle("Points de fonctionnement (mode RUN) — " + nom, x=0.01, ha="left",
-                 fontsize=12, fontweight="bold", color=C_ENCRE)
-    run = D["mode"] == "RUN"
+    fig, ax = plt.subplots(2, 2, figsize=(16, 9.5))
+    fig.suptitle("Points de fonctionnement (moteurs qui tournent) — " + nom, x=0.01, ha="left",
+                 fontsize=14, fontweight="bold", color=C_ENCRE)
+    run = actif(D)                                # au moins un moteur tourne
     with np.errstate(all="ignore"):
         rpm = np.nanmean(np.vstack([D["rpm10"], D["rpm11"]]), axis=0)
     kw = dict(s=6, alpha=0.35, linewidths=0)
@@ -504,16 +554,16 @@ def p_correlations(plt, D, nom):
     a.scatter(D["rpm11"][run], D["imot11"][run], color=C_ESC11, label="ESC 11", **kw)
     a.set_title("Courant moteur vs régime (courbe d'hélice ; mur horizontal = limite de courant)")
     a.set_xlabel("tr/min"); a.set_ylabel("A")
-    a.legend(loc="lower right", markerscale=3)
+    legende(a, markerscale=3)
 
     a = ax[1, 1]
     a.scatter(D["rpm10"][run], D["duty10"][run], color=C_ESC10, label="ESC 10", **kw)
     a.scatter(D["rpm11"][run], D["duty11"][run], color=C_ESC11, label="ESC 11", **kw)
     a.axhline(0.95, color=C_ENCRE2, lw=0.8, ls="--")
-    a.text(0, 0.955, " duty max VESC", color=C_ENCRE2, va="bottom", fontsize=8)
+    a.text(0, 0.955, " duty max VESC", color=C_ENCRE2, va="bottom", fontsize=10)
     a.set_title("Duty vs régime (loin de 0,95 = marge de tension)")
     a.set_xlabel("tr/min"); a.set_ylabel("duty")
-    a.legend(loc="center left", markerscale=3)
+    legende(a, markerscale=3)
     for a in ax.flat:
         a.grid(True)
     fig.tight_layout(rect=(0, 0, 1, 0.96))
@@ -539,10 +589,32 @@ def p_sante(plt, D, nom):
     ax[2].plot(D["t"], D["pitch"], color=C_ESC11, label="tangage")
     ax[2].set_title("Attitude Xsens")
     ax[2].set_ylabel("°")
-    ax[2].legend(loc="upper left", ncol=2)
+    legende(ax[2])
 
     ax[3].step(D["t"], D["wd_err"], color=C_ALERTE, where="post")
     ax[3].set_title("Watchdog : code d'erreur (0 = OK ; 65536 / 131072 / 196608 = VESC 10 / 11 / les deux muets)")
+    return fig
+
+
+def p_essentiel(plt, D, nom):
+    """Les 3 graphiques principaux, échelle détaillée, affichés à l'écran."""
+    fig, ax = page(plt, 3, "Moteurs en marche — " + nom, D, hauteur=2.9)
+    fig.set_size_inches(15, 9.5)
+    if D["cmode"] == "ERPM":
+        ax[0].plot(D["t"], np.abs(D["ramped"]) / POLE_PAIRS, color=C_TROIS, lw=1.6,
+                   label="consigne envoyée (rampée)")
+    ax[0].plot(D["t"], D["rpm10"], color=C_ESC10, label="ESC 10 réel")
+    ax[0].plot(D["t"], D["rpm11"], color=C_ESC11, label="ESC 11 réel")
+    ax[0].set_title("Régime moteur : consigne vs réel (écart = moteur qui ne suit pas)")
+    ax[0].set_ylabel("tr/min")
+    legende(ax[0])
+    deux_esc(ax[1], D, "imot", "Courant moteur (couple) — plateau = limite Motor Current Max", "A")
+    ax[2].plot(D["t"], D["pbat"] / 1000, color=C_ENCRE)
+    ax[2].set_title("Puissance batterie totale (les deux ESC)")
+    ax[2].set_ylabel("kW")
+    for a in ax:
+        a.set_ylim(bottom=0)
+        echelle_fine(a)
     return fig
 
 
@@ -559,12 +631,12 @@ def p_moteur(plt, D, nom):
     ax[2].axhline(MOT_P_NOM / 1000, color=C_ENCRE2, lw=0.9, ls="--")
     ax[2].text(1.0, MOT_P_NOM / 1000, "nominal %.0f kW " % (MOT_P_NOM / 1000),
                transform=ax[2].get_yaxis_transform(), ha="right", va="bottom",
-               fontsize=8, color=C_ENCRE2)
+               fontsize=10, color=C_ENCRE2)
     pmax = np.nanmax(np.r_[D["pmec10"], D["pmec11"], [0]]) / 1000
     ax[2].set_ylim(0, max(pmax, MOT_P_NOM / 1000) * 1.12)
     ax[2].set_title("Puissance mécanique à l'arbre (couple × ω)")
     ax[2].set_ylabel("kW")
-    ax[2].legend(loc="upper left", ncol=2)
+    legende(ax[2])
     a = ax[3]
     a.plot(D["t"], D["eta10"], color=C_ESC10, label="ESC 10")
     a.plot(D["t"], D["eta11"], color=C_ESC11, label="ESC 11")
@@ -574,7 +646,7 @@ def p_moteur(plt, D, nom):
                 "et fiche au même couple, à 60 V (pointillé)")
     a.set_ylabel("%")
     a.set_ylim(0, 100)
-    a.legend(loc="lower left", ncol=4)
+    legende(a)
     return fig
 
 
@@ -658,14 +730,17 @@ def main():
     ap.add_argument("--out", help="dossier de sortie (défaut : <session>_graphs à côté du log)")
     ap.add_argument("--debut", type=float, help="début du zoom (s depuis le début du log)")
     ap.add_argument("--fin", type=float, help="fin du zoom (s)")
-    ap.add_argument("--show", action="store_true", help="ouvrir aussi les fenêtres")
+    ap.add_argument("--sans-fenetre", action="store_true",
+                    help="ne rien afficher, seulement enregistrer les PNG")
+    ap.add_argument("--show", action="store_true",
+                    help="afficher toutes les pages (par défaut : seulement 0_moteurs)")
     ap.add_argument("--complet", action="store_true",
-                    help="garder les temps morts dans les graphiques")
+                    help="garder les périodes où les moteurs sont arrêtés")
     a = ap.parse_args()
     # Anciens logs : champs absents (CAN, GPS...) → colonnes vides, sans avertissements
     warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-    if not a.show:
+    if a.sans_fenetre:
         matplotlib.use("Agg")
     plt = style()
 
@@ -677,7 +752,7 @@ def main():
 
     G = D if a.complet else compacter(D)          # données des graphiques
 
-    pages = [("1_conduite", p_conduite), ("2_puissance", p_puissance),
+    pages = [("0_moteurs", p_essentiel), ("1_conduite", p_conduite), ("2_puissance", p_puissance),
              ("3_thermique", p_thermique), ("4_correlations", p_correlations),
              ("5_sante", p_sante), ("6_moteur", p_moteur)]
     for fichier, fn in pages:
@@ -685,19 +760,20 @@ def main():
         if fichier != "4_correlations":
             fig.tight_layout(rect=(0, 0, 1, 0.97))
         fig.savefig(os.path.join(out, fichier + ".png"))
-        if not a.show:
+        a_afficher = not a.sans_fenetre and (a.show or fichier == "0_moteurs")
+        if not a_afficher:
             plt.close(fig)
 
     txt = resume(D, path)
     if G.get("coupures"):
-        txt += "\nGraphiques : %.0f min de temps morts retirés (%d coupures, --complet pour tout garder)" % (
+        txt += "\nGraphiques : %.0f min moteurs arrêtés retirés (%d coupures, --complet pour tout garder)" % (
             G["retire_min"], len(G["coupures"]))
     with open(os.path.join(out, "resume.txt"), "w", encoding="utf-8") as f:
         f.write(txt + "\n")
     print(txt)
     print("\nGraphiques dans :", out)
-    if a.show:
-        plt.show()
+    if not a.sans_fenetre:
+        plt.show()                                # bloque jusqu'à la fermeture des fenêtres
 
 
 if __name__ == "__main__":

@@ -31,6 +31,8 @@ float R_output                  =  0.0f;
 float HPR_cmd_servos[NB_CANAUX] = {0.0f, 0.0f, 0.0f};
 float HPR_control_time_us       =  0.0f;
 float R_ref_output              =  0.0f;
+float H_integral_out[NB_CANAUX] = {0.0f, 0.0f, 0.0f};   // MODIF (log SD) : intégrales publiées
+float R_integral_out            =  0.0f;
 
 // Utilitaires
 static inline float fabs_local(float v) {
@@ -53,26 +55,53 @@ static inline float fclamp(float v, float lo, float hi) {
 //  => la variable de commande (cmd, SERVO_*_NEUTRAL/MIN/MAX) est
 //     désormais un ANGLE FOIL, plus un argument PWMServo brut.
 // ============================================================
-static uint16_t foilToPulse(float angleDeg)
+// MODIF (correctif A) : foilToPulse retourne un float (plus de troncature uint16).
+static float foilToPulse(float angleDeg)
 {
     float t = (angleDeg - FOIL_MIN_DEG) / (float)(FOIL_MAX_DEG - FOIL_MIN_DEG);
     float pulse = FOIL_PULSE_MIN_US + t * (float)(FOIL_PULSE_MAX_US - FOIL_PULSE_MIN_US);
     if (pulse > FOIL_PULSE_MAX_US) pulse = FOIL_PULSE_MAX_US;
     if (pulse < FOIL_PULSE_MIN_US) pulse = FOIL_PULSE_MIN_US;
-    return (uint16_t)pulse;
+    return pulse;
 }
 
-static uint8_t usToDeg(uint16_t us)
-{
-    float deg = (float)(us - 500) / (2500.0f - 500.0f) * 180.0f;
-    if (deg > 180.0f) deg = 180.0f;
-    if (deg <   0.0f) deg =   0.0f;
-    return (uint8_t)deg;
-}
+// ANCIEN (correctif A) : conversion en degré ENTIER -> pas de ~10 µs (~2 unités foil).
+// static uint8_t usToDeg(uint16_t us)
+// {
+//     float deg = (float)(us - 500) / (2500.0f - 500.0f) * 180.0f;
+//     if (deg > 180.0f) deg = 180.0f;
+//     if (deg <   0.0f) deg =   0.0f;
+//     return (uint8_t)deg;
+// }
+//
+// static inline void foilWrite(PWMServo &s, float angleDeg)
+// {
+//     s.write(usToDeg(foilToPulse(angleDeg)));
+// }
 
-static inline void foilWrite(PWMServo &s, float angleDeg)
+// MODIF (correctif A) : écriture directe du duty PWM en 15 bits (~0,6 µs/pas)
+// au lieu de PWMServo::write(int deg) (~10,3 µs/pas).
+// Même échelle que l'ancienne chaîne usToDeg + PWMServo (544-2400 µs) :
+//   us = 544 + (us_req - 500) * 1856/2000 - 10,31  ->  ≈ 998 + 5,16 × angle foil
+// Le -10,31 µs (= 1 ancien pas PWMServo) compense la troncature (uint8_t) de
+// l'ancien usToDeg : pour un angle foil PAIR, l'impulsion est identique à
+// l'ancienne (< 0,5 µs) ; pour un angle IMPAIR, l'ancienne valeur N vaut N+1 ici.
+// PWMServo::attach() reste utilisé pour régler la fréquence à 50 Hz.
+#define FOIL_US_TRUNC_COMP   (1856.0f / 180.0f)   // 10,31 µs
+static inline void foilWrite(uint8_t pin, float angleDeg)
 {
-    s.write(usToDeg(foilToPulse(angleDeg)));
+    float us_req = foilToPulse(angleDeg);
+    float us     = 544.0f + (us_req - 500.0f) * (1856.0f / 2000.0f) - FOIL_US_TRUNC_COMP;
+    uint32_t duty = (uint32_t)(us * 32768.0f / 20000.0f + 0.5f);   // 15 bits @ 50 Hz
+
+    // Section protégée : PWMServo (ESC, rudder) force analogWriteResolution(12)
+    // à chaque write(). On change la résolution puis on la restaure sans
+    // qu'une autre tâche puisse s'intercaler.
+    vTaskSuspendAll();
+    uint32_t prev_res = analogWriteResolution(15);
+    analogWrite(pin, duty);
+    analogWriteResolution(prev_res);
+    xTaskResumeAll();
 }
 
 // PID Fuzzy Hauteur — par foil
@@ -158,9 +187,10 @@ void Task_foils_Control(void *ptr)
     servo_arriere_droit.attach(PWM_Servo_Arriere_Droit);
 
     // MODIF : neutre initial passé par le mapping Miniature (pas write() brut)
-    foilWrite(servo_avant,          (float)SERVO_AVANT_NEUTRAL);
-    foilWrite(servo_arriere_gauche, (float)SERVO_ARRIERE_GAUCHE_NEUTRAL);
-    foilWrite(servo_arriere_droit,  (float)SERVO_ARRIERE_DROIT_NEUTRAL);
+    // MODIF (correctif A) : foilWrite prend maintenant la pin
+    foilWrite(PWM_Servo_Avant,          (float)SERVO_AVANT_NEUTRAL);
+    foilWrite(PWM_Servo_Arriere_Gauche, (float)SERVO_ARRIERE_GAUCHE_NEUTRAL);
+    foilWrite(PWM_Servo_Arriere_Droit,  (float)SERVO_ARRIERE_DROIT_NEUTRAL);
 
     while (1)
     {
@@ -256,6 +286,12 @@ void Task_foils_Control(void *ptr)
                     roll_out = 0.0f;
                 }
         
+        // MODIF (correctif C) : priorité au roulis. La hauteur ne peut pas
+        // consommer toute la course des foils arrière : il reste toujours
+        // au moins ~7 unités de chaque côté pour la correction de roulis.
+        hauteur_out[1] = fclamp(hauteur_out[1], -H_ARRIERE_OUT_MAX, H_ARRIERE_OUT_MAX);
+        hauteur_out[2] = fclamp(hauteur_out[2], -H_ARRIERE_OUT_MAX, H_ARRIERE_OUT_MAX);
+
         servo_raw[0] = (float)SERVO_NEUTRAL[0] + SERVO_SENS[0] * (hauteur_out[0] - pitch_out);              // avant
         servo_raw[1] = (float)SERVO_NEUTRAL[1] + SERVO_SENS[1] * (hauteur_out[1] + pitch_out + roll_out);   // arr. gauche
         servo_raw[2] = (float)SERVO_NEUTRAL[2] + SERVO_SENS[2] * (hauteur_out[2] + pitch_out - roll_out);   // arr. droit
@@ -281,10 +317,10 @@ void Task_foils_Control(void *ptr)
             cmd[i]      = cmd_filt[i];
         }
 
-        // MODIF : écriture via le mapping Miniature (usToDegfoilToPulse)
-        foilWrite(servo_avant,          cmd[0]);
-        foilWrite(servo_arriere_gauche, cmd[1]);
-        foilWrite(servo_arriere_droit,  cmd[2]);
+        // MODIF : écriture via le mapping Miniature (foilToPulse, résolution µs)
+        foilWrite(PWM_Servo_Avant,          cmd[0]);
+        foilWrite(PWM_Servo_Arriere_Gauche, cmd[1]);
+        foilWrite(PWM_Servo_Arriere_Droit,  cmd[2]);
 
         float duree_us = (float)(micros() - t_debut);
 
@@ -298,6 +334,9 @@ void Task_foils_Control(void *ptr)
             R_output             = roll_out;
             R_ref_output         = roll_ref_filt;
             HPR_control_time_us  = duree_us;
+            // MODIF (log SD) : intégrales pour vérifier l'anti-windup
+            for (int i = 0; i < NB_CANAUX; i++) H_integral_out[i] = H_integral[i];
+            R_integral_out       = R_integral;
             xSemaphoreGive(dataMutex);
         }
 

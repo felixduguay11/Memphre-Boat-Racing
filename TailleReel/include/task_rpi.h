@@ -14,6 +14,8 @@
 //    Pi → Teensy : {"cmd":"start"} / {"cmd":"stop"}
 //                  {"cmd":"calib"} / {"cmd":"calib_fin"} / {"cmd":"calib_annule"}
 //                  {"cmd":"escconf"} (renvoi des paramètres des VESC)
+//                  {"cmd":"cruise_erpm"} / {"cmd":"cruise_vitesse"} /
+//                  {"cmd":"cruise_off"} / {"cmd":"cruise_vie"} (cruise control)
 //    Teensy → Pi : télémétrie JSON à 20 Hz si streaming,
 //                  sinon {"type":"hb",...} toutes les HB_MS.
 //                  {"type":"escconf",...} dès qu'une config de VESC
