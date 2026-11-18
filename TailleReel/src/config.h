@@ -404,6 +404,58 @@
 //------------------------------------//
 
 
+//---------- CRUISE CONTROL ----------//
+// État RUN·CRUISE de la machine d'état, activé par la case
+// « Cruise control » de la page Moteurs de l'UI du Pi :
+//   {"cmd":"cruise_erpm"}     → consigne tenue à CRUISE_ERPM
+//   {"cmd":"cruise_vitesse"}  → vitesse GPS tenue à CRUISE_VITESSE_KMH
+//   {"cmd":"cruise_off"}      → sortie
+//   {"cmd":"cruise_vie"}      → signe de vie de l'UI (envoyé en continu)
+// Entrée  : seulement depuis RUN·FORWARD (levier armé et poussé).
+//           La consigne part de celle du levier et rejoint la cible
+//           avec une rampe (pas de saut).
+// Pendant : le levier doit rester hors du repos ; sa position ne
+//           compte plus, c'est le cruise qui fixe la consigne.
+// Sortie  : levier au repos, case Cruise control (ou Stop), switch F/R,
+//           UI muette, vitesse GPS invalide (cruise vitesse)
+//           → consigne 0, et le levier doit repasser au neutre
+//             avant de commander de nouveau.
+//           Switch ON à OFF → IDLE, erreur critique → ARRET.
+#define CRUISE_ACTIF            1      // 0 = boutons de l'UI sans effet
+
+// ── Cruise ERPM ──
+// Consigne eRPM fixe : c'est la boucle de vitesse du VESC qui tient
+// le régime (pas de deadband à régler).
+#define CRUISE_ERPM             4600   // eRPM (= 1150 tr/min moteur, 4 paires de pôles)
+// Rampe de la consigne, de celle du levier à l'entrée jusqu'à
+// CRUISE_ERPM. Par défaut = rampe du levier (CMD_RAMP_STEP toutes
+// les 20 ms = 4000 eRPM/s) ; plus petit = démarrage plus doux.
+#define CRUISE_RAMPE_ERPM_S     (CMD_RAMP_STEP * 1000.0f / PERIODE_PROP_MS)
+
+// ── Cruise vitesse (GPS de l'Xsens) ──
+// La consigne (eRPM) part de celle du levier, puis monte ou descend
+// à une pente proportionnelle à l'écart de vitesse. Dans le deadband
+// elle ne bouge plus.
+#define CRUISE_VITESSE_KMH      15.0f  // km/h
+#define CRUISE_VIT_DEADBAND_KMH 0.5f   // ± km/h autour de la cible
+#define CRUISE_VIT_GAIN         80.0f  // eRPM par seconde, par km/h d'écart
+#define CRUISE_VIT_PENTE_MAX    400.0f // eRPM/s : variation max de la consigne
+#define CRUISE_VIT_ERPM_MAX     8000   // plafond de la consigne (2000 tr/min)
+// Moteurs au plafond de courant du VESC : ils ne suivent plus la
+// consigne. Si (consigne - régime réel) dépasse cet écart, la
+// consigne ne monte plus (sinon elle s'emballe jusqu'au plafond).
+#define CRUISE_VIT_ECART_MAX    1200   // eRPM
+
+// L'UI envoie {"cmd":"cruise_vie"} en continu. Plus rien depuis ce
+// délai (UI fermée, Stop, USB débranché) → sortie du cruise.
+#define CRUISE_UI_TIMEOUT_MS    1000
+
+#if CRUISE_ACTIF && (MODE_COMMANDE != MODE_ERPM)
+  #error "CRUISE_ACTIF : le cruise control n'existe qu'en MODE_ERPM (mettre CRUISE_ACTIF a 0 en MODE_DUTY)"
+#endif
+//------------------------------------//
+
+
 //------------- WATCHDOG -------------//
 #define WD_TIMEOUT_CRITIQUE_MS   300   // Pilote, FSM, Propulsion, ESC → ARRET
 #define WD_TIMEOUT_CAPTEUR_MS    1000  // Xsens, Sonar, Foils, RPi → pas de CONTROLE

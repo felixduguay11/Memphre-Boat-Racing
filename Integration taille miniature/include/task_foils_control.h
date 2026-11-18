@@ -19,6 +19,8 @@ extern float R_output;
 extern float HPR_cmd_servos[NB_CANAUX];
 extern float HPR_control_time_us;
 extern float R_ref_output;
+extern float H_integral_out[NB_CANAUX];   // MODIF (log SD)
+extern float R_integral_out;              // MODIF (log SD)
 
 // ─── Tâche FreeRTOS ───────────────────────────────────────────────────
 void Task_foils_Control(void *ptr);

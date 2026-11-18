@@ -104,6 +104,23 @@ QPushButton#tab   {{ font-size:22px; border-radius:10px; border:1px solid {line}
                      background:transparent; color:{muted}; }}
 QPushButton#tabOn {{ font-size:22px; font-weight:600; border-radius:10px; border:2px solid {accent};
                      background:{accent_bg}; color:{accent_fg}; }}
+QPushButton#cruise   {{ font-size:22px; border-radius:10px; border:2px solid {accent};
+                        background:{accent_bg}; color:{accent_fg}; min-height:54px; }}
+QPushButton#cruiseOn {{ font-size:22px; font-weight:600; border-radius:10px; border:2px solid {ok_fg};
+                        background:{ok_bg}; color:{ok_fg}; min-height:54px; }}
+QPushButton#cruise:disabled {{ color:{line}; border-color:{line}; background:transparent; }}
+QLabel#cruiseTimer   {{ font-size:30px; font-weight:600; color:{muted}; }}
+QLabel#cruiseTimerOn {{ font-size:30px; font-weight:600; color:{ok_fg}; }}
+QLabel#cruiseInfo    {{ font-size:15px; color:{muted}; }}
+QLabel#cruiseInfoRearme {{ font-size:15px; font-weight:600; color:{ko_fg}; }}
+QFrame#cruisePopup   {{ background:{card}; border:3px solid {accent}; border-radius:14px; }}
+QFrame#cruisePopup QLabel {{ background:transparent; }}
+QLabel#cruisePopupTitle {{ font-size:26px; font-weight:600; color:{accent_fg}; }}
+QPushButton#cruiseChoix {{ font-size:28px; font-weight:600; border-radius:12px; border:2px solid {accent};
+                        background:{accent_bg}; color:{accent_fg}; }}
+QPushButton#cruiseChoix:disabled {{ color:{line}; border-color:{line}; background:transparent; }}
+QPushButton#cruiseAnnuler {{ font-size:24px; border-radius:10px; border:2px solid {muted};
+                        background:transparent; color:{text}; min-height:62px; }}
 QPushButton:pressed {{ background:{press}; }}
 QPushButton:disabled {{ color:{line}; border-color:{line}; background:transparent; }}
 QPlainTextEdit#flashLog {{ background:{card}; color:{text}; border:none; border-radius:10px;

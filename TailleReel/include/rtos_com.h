@@ -9,6 +9,8 @@
 //   Task_StateMachine ─(egEtat : bits d'état)─────► Propulsion, Foils
 //   Task_Watchdog ─────(egEtat : bits d'erreur)───► StateMachine, Propulsion
 //   Task_RPi ──────────(egEtat : EVT_CALIB_*)─────► Pilote (calibration levier)
+//   Task_RPi ──────────(egEtat : EVT_CRUISE_*)────► StateMachine (cruise control)
+//   Task_RPi ──────────(egEtat : EVT_BATT_BASSE)──► Propulsion (plafond batterie)
 //   Tâches ───────────(Shared Data, dataMutex)────► RPi, Watchdog, FSM
 //
 //  qCmd est une « mailbox » : longueur 1, écrite par xQueueOverwrite()
@@ -24,9 +26,9 @@
 #include <event_groups.h>
 #include "config.h"
 
-// ─── États (noms de Real_V1 + ajouts ARRET / CONTROLE) ───
+// ─── États (noms de Real_V1 + ajouts ARRET / CONTROLE / CRUISE) ───
 enum class ControlMode : uint8_t { IDLE = 0, RUN = 1, ARRET = 2 };
-enum class RunMode     : uint8_t { NEUTRAL = 0, FORWARD = 1, REVERSE = 2, CONTROLE = 3 };
+enum class RunMode     : uint8_t { NEUTRAL = 0, FORWARD = 1, REVERSE = 2, CONTROLE = 3, CRUISE = 4 };
 
 // ─── Snapshot des entrées pilote (publié par Task_Pilote) ───
 struct PiloteData {
@@ -85,6 +87,13 @@ struct FsmCmd {
 #define EVT_CALIB_FIN      (1UL << 17)  // {"cmd":"calib_fin"}
 #define EVT_CALIB_ANNULE   (1UL << 18)  // {"cmd":"calib_annule"}
 #define EVT_CALIB_MASK     (EVT_CALIB_DEBUT | EVT_CALIB_FIN | EVT_CALIB_ANNULE)
+// Écrits par Task_RPi (boutons cruise de l'UI), lus et effacés par la machine d'état
+#define EVT_CRUISE_ERPM    (1UL << 19)  // {"cmd":"cruise_erpm"}
+#define EVT_CRUISE_VIT     (1UL << 20)  // {"cmd":"cruise_vitesse"}
+#define EVT_CRUISE_OFF     (1UL << 21)  // {"cmd":"cruise_off"} (ou {"cmd":"stop"})
+#define EVT_CRUISE_MASK    (EVT_CRUISE_ERPM | EVT_CRUISE_VIT | EVT_CRUISE_OFF)
+// Écrit par Task_RPi ({"cmd":"batt_basse"} / {"cmd":"batt_ok"}), lu par Task_Propulsion
+#define EVT_BATT_BASSE     (1UL << 22)  // → consigne plafonnée à ±CMD_MAX_BATT_*
 
 // ─── Objets FreeRTOS (définis dans main.cpp) ───
 extern SemaphoreHandle_t  dataMutex;

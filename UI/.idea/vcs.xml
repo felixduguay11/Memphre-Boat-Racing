@@ -2,5 +2,11 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$/.." vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../Integration taille miniature/lib/PWMServo" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../Integration taille miniature/lib/freertos-teensy" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../Integration taille miniature/platform/platform-teensy" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../TailleReel/lib/PWMServo" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../TailleReel/lib/freertos-teensy" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../TailleReel/platform/platform-teensy" vcs="Git" />
   </component>
 </project>

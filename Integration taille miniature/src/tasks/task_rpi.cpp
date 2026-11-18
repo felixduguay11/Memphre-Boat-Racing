@@ -1,6 +1,7 @@
 #include "task_rpi.h"
 #include "task_propulsion.h"      // MODIF : snapshot manette (Prop_*)
 #include "task_state_machine.h"   // MODIF : état machine (SM_*) + enums
+#include "task_sdlog.h"           // MODIF : état de la journalisation SD
 
 
 // Mutex défini dans main.cpp
@@ -84,6 +85,15 @@ void Task_RPi(void *ptr)
     float    r_out                = 0.0f;
     float    r_ref                = 0.0f;
 
+    // MODIF : journalisation SD + vitesse GPS
+    SDLogEtat sd_etat             = SDLogEtat::INIT;
+    uint16_t  sd_fichier          = 0;
+    uint32_t  sd_lignes           = 0;
+    uint32_t  sd_perdues          = 0;
+    uint32_t  sd_err              = 0;
+    float     v_kmh               = 0.0f;
+    bool      v_ok                = false;
+
     if (xSemaphoreTake(dataMutex, portMAX_DELAY))
     {
       dist_avant            = Sonar_distance[0];
@@ -123,6 +133,15 @@ void Task_RPi(void *ptr)
       rc_valid              = Prop_rc_valid;
       temps_tache_prop      = Prop_control_time_us;
 
+      // MODIF : journalisation SD + vitesse GPS
+      sd_etat               = SDLog_etat;
+      sd_fichier            = SDLog_fichier_no;
+      sd_lignes             = SDLog_lignes;
+      sd_perdues            = SDLog_perdues;
+      sd_err                = SDLog_err_ecriture;
+      v_kmh                 = Xsens_data.speed * 3.6f;
+      v_ok                  = Xsens_data.vel_valid;
+
       xSemaphoreGive(dataMutex);
     }
 
@@ -154,6 +173,23 @@ void Task_RPi(void *ptr)
     Serial.print("  Pitch="); Serial.print(pitch, 2);
     Serial.print("  Yaw=");   Serial.print(yaw,   2);
     Serial.println(" deg");
+
+    // --- MODIF : vitesse GPS (Xsens + antenne) ---
+    Serial.print("[GPS]      ");
+    Serial.print("V=");  Serial.print(v_kmh, 1);
+    Serial.println(v_ok ? " km/h" : " km/h (invalide)");
+
+    // --- MODIF : journalisation SD ---
+    Serial.print("[SD]       ");
+    Serial.print(SDLog_etatStr(sd_etat));
+    Serial.print("  run_");
+    if (sd_fichier < 1000) Serial.print('0');
+    if (sd_fichier < 100)  Serial.print('0');
+    if (sd_fichier < 10)   Serial.print('0');
+    Serial.print(sd_fichier);
+    Serial.print(".jsonl  lignes="); Serial.print(sd_lignes);
+    Serial.print("  perdues=");      Serial.print(sd_perdues);
+    Serial.print("  err=");          Serial.println(sd_err);
 
     // --- Roll ---
     Serial.print("  R_out=");  Serial.print(r_out, 2);

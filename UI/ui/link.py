@@ -124,7 +124,32 @@ class SerialLink(BaseLink):
 # Conservee : c'est le seul moyen de travailler l'UI sans bateau.
 # Ne tourne plus que sur --sim.
 class SimLink(BaseLink):
-    """Fabrique des trames identiques a celles du Teensy, sans materiel."""
+    """Fabrique des trames identiques a celles du Teensy, sans materiel.
+
+    Modele simplifie du bateau, pour voir le cruise control comme sur
+    l'eau : un pilote fictif bouge le levier, la machine d'etat et la
+    rampe de Task_Propulsion sont reproduites (memes reglages que
+    config.h), le regime suit la consigne rampee et la vitesse suit le
+    regime. Apres une sortie du cruise, la consigne reste a 0 jusqu'a ce
+    que le pilote fictif remette le levier au repos (SIM_REARME_S)."""
+
+    # Reprise de config.h (Teensy) — a garder en accord
+    SIM_CRUISE_ERPM = 4600
+    SIM_CRUISE_KMH = 15.0
+    SIM_RAMPE = 4000.0          # eRPM/s : rampe du levier (CMD_RAMP_STEP / 20 ms)
+    SIM_MIN_UTILE = 400         # CMD_MIN_UTILE
+    SIM_VIT_DEADBAND = 0.5
+    SIM_VIT_GAIN = 80.0
+    SIM_VIT_PENTE_MAX = 400.0
+    SIM_VIT_ERPM_MAX = 8000
+    SIM_VIT_ECART_MAX = 1200
+    SIM_UI_TIMEOUT_S = 1.0
+    SIM_ERPM_MAX_FORWARD = 16000    # ERPM_MAX_FORWARD
+    SIM_BATT_BASSE_PCT = 20         # BATT_BASSE_PCT
+    # Modele du bateau
+    SIM_ERPM_PAR_KMH = 380.0    # sessions 24 / 28
+    SIM_TAU_S = 2.0             # retard de la vitesse sur le regime
+    SIM_REARME_S = 2.0          # le pilote fictif remet le levier au repos
 
     def __init__(self, esc_ids, period_ms: int = 50):
         super().__init__()
@@ -132,6 +157,12 @@ class SimLink(BaseLink):
         self._n = 0
         self._active = False
         self._cal, self._cmin, self._cmax, self._cres = False, 1023, 0, 0
+        # Cruise control : mode, debut, duree (ms), raison de sortie, signe de vie
+        self._cr, self._cr_t0, self._cr_t, self._cr_fin, self._cr_vie = 0, 0.0, 0, 0, 0.0
+        self._cr_cons = 0.0         # consigne du cruise (rampe / boucle vitesse)
+        self._arme = True           # levier arme (False : consigne 0 jusqu'au repos)
+        self._t_sortie = 0.0        # instant de la sortie du cruise
+        self._target, self._ramped, self._v = 0, 0.0, 0.0
         self._cap = False                 # plafond batterie basse (comme le Teensy)
         self._timer = QTimer(self)
         self._timer.setInterval(period_ms)
@@ -148,8 +179,14 @@ class SimLink(BaseLink):
 
     def send(self, obj: dict):
         cmd = obj.get("cmd")
-        if cmd in ("start", "stop"):
+        if isinstance(cmd, str) and cmd.startswith("cruise_"):
+            self._cruise_cmd(cmd)
+            if cmd == "cruise_vie":
+                return                          # 5 par seconde : pas de message
+        elif cmd in ("start", "stop"):
             self._active = cmd == "start"
+            if cmd == "stop":
+                self._cruise_fin(1)
         elif cmd == "calib":
             self._cal, self._cmin, self._cmax, self._cres = True, 1023, 0, 0
         elif cmd == "calib_fin" and self._cal:
@@ -161,6 +198,66 @@ class SimLink(BaseLink):
         elif cmd in ("batt_basse", "batt_ok"):
             self._cap = cmd == "batt_basse"
         self.status.emit("recu: %s" % json.dumps(obj))
+
+    def _cruise_cmd(self, cmd: str):
+        """Comme le Teensy : demande acceptee seulement en FORWARD (levier
+        arme) ; un autre mode pendant un cruise est ignore."""
+        self._cr_vie = time.monotonic()
+        if cmd == "cruise_off":
+            self._cruise_fin(1)
+        elif cmd in ("cruise_erpm", "cruise_vitesse") and not self._cr:
+            if not self._arme:
+                self._cr_fin = 8                # refuse : pas en FORWARD
+                return
+            self._cr = 1 if cmd == "cruise_erpm" else 2
+            self._cr_t0, self._cr_t, self._cr_fin = time.monotonic(), 0, 0
+            self._cr_cons = float(max(self._target, self.SIM_MIN_UTILE))
+
+    def _cruise_fin(self, raison: int):
+        """Sortie : consigne 0 et levier a remettre au repos."""
+        if self._cr:
+            self._cr, self._cr_fin = 0, raison
+            self._arme, self._t_sortie = False, time.monotonic()
+
+    def _sim_pas(self, dt: float, levier: float):
+        """Un pas de la machine d'etat + Task_Propulsion + bateau."""
+        if self._cr and time.monotonic() - self._cr_vie > self.SIM_UI_TIMEOUT_S:
+            self._cruise_fin(5)                 # ecran muet
+        if not self._arme and time.monotonic() - self._t_sortie > self.SIM_REARME_S:
+            self._arme = True                   # levier remis au repos puis repousse
+        # Machine d'etat : consigne
+        if self._cr == 1:                       # ERPM : rampe vers la cible
+            pas = self.SIM_RAMPE * dt
+            c = self._cr_cons
+            self._cr_cons = min(c + pas, self.SIM_CRUISE_ERPM) if c < self.SIM_CRUISE_ERPM \
+                else max(c - pas, self.SIM_CRUISE_ERPM)
+        elif self._cr == 2:                     # vitesse : comme CruiseVitesse()
+            err = self.SIM_CRUISE_KMH - self._v
+            if abs(err) > self.SIM_VIT_DEADBAND:
+                pente = max(-self.SIM_VIT_PENTE_MAX, min(self.SIM_VIT_PENTE_MAX, self.SIM_VIT_GAIN * err))
+                if pente > 0 and self._cr_cons - self._ramped > self.SIM_VIT_ECART_MAX:
+                    pente = 0.0
+                self._cr_cons += pente * dt
+            self._cr_cons = max(self.SIM_MIN_UTILE, min(self.SIM_VIT_ERPM_MAX, self._cr_cons))
+        if self._cr:
+            self._target = int(round(self._cr_cons))
+            self._cr_t = int((time.monotonic() - self._cr_t0) * 1000)
+        else:
+            self._target = int(levier) if self._arme else 0
+        # Task_Propulsion : plafond batterie basse (EVT_BATT_BASSE), puis rampe
+        t, r = self._target, self._ramped
+        if self._cap:
+            t = min(t, self.SIM_ERPM_MAX_FORWARD * self.SIM_BATT_BASSE_PCT // 100)
+        if t == 0:
+            r = 0.0
+        else:
+            if r == 0:
+                r = float(self.SIM_MIN_UTILE)
+            pas = self.SIM_RAMPE * dt
+            r = min(r + pas, t) if r < t else max(r - pas, t)
+        self._ramped = r
+        # Bateau : la vitesse suit le regime
+        self._v += (r / self.SIM_ERPM_PAR_KMH - self._v) * min(1.0, dt / self.SIM_TAU_S)
 
     def _emit_escconf(self):
         """Configs simulees a partir des fichiers de reference, avec
@@ -189,11 +286,12 @@ class SimLink(BaseLink):
             return
         self._n += 1
         n = self._n
-        erpm = 3200 + math.sin(n / 25.0) * 450
-        if self._cap:
-            erpm = min(erpm, 16000 * 0.20)      # ERPM_MAX_FORWARD * BATT_BASSE_PCT
+        # Pilote fictif : levier entre ~1000 et ~6000 eRPM (3 a 16 km/h)
+        levier = 3500 + math.sin(n / 80.0) * 2500
+        self._sim_pas(self._timer.interval() / 1000.0, levier)
+        erpm = self._ramped
         vin = 71.0 + math.sin(n / 40.0) * 1.4
-        iin = 18.0 + math.sin(n / 15.0) * 5.0
+        iin = 2.0 + 0.9 * (erpm / 1000.0) ** 2 + math.sin(n / 15.0) * 0.5
         escs = []
         for k, i in enumerate(self._ids):
             f = 1.0 - 0.02 * k
@@ -203,7 +301,7 @@ class SimLink(BaseLink):
                 "v_in": vin, "t_fet": 42 + n / 400.0, "t_mot": 38 + n / 500.0,
             })
         # Xsens (format du firmware Integration taille reel)
-        v = 11.0 + math.sin(n / 60.0) * 9.0                     # 2..20 km/h
+        v = self._v + math.sin(n / 7.0) * 0.1                   # bruit du GPS
         imu = {"ok": 1, "frais": 1, "roll": math.sin(n / 18.0) * 6.0,
                "pitch": 2.0 + math.sin(n / 30.0) * 1.5,
                "yaw": (n * 0.5) % 360 - 180, "vok": 1, "v_kmh": v}
@@ -227,11 +325,19 @@ class SimLink(BaseLink):
         p_out = round(math.sin(n / 30.0) * 2.0, 2) if ctl else 0.0
         r_out = round(math.sin(n / 18.0) * 3.0, 2) if ctl else 0.0
         foils = {"on": int(ctl), "cmd": cmd, "h": h, "p": p_out, "r": r_out}
+        cr = {"m": self._cr, "t": self._cr_t, "fin": self._cr_fin,
+              "erpm": self.SIM_CRUISE_ERPM, "kmh": self.SIM_CRUISE_KMH}
+        if self._cr:
+            run = "CRUISE"                      # foils actifs aussi en CRUISE (EVT_CONTROLE)
+        elif not self._arme:
+            run = "NEUTRAL"                     # apres une sortie du cruise
+        else:
+            run = "CONTROLE" if ctl else "FORWARD"
         self.telemetry.emit({"t": n * self._timer.interval(), "mode": "RUN",
-                             "run": "CONTROLE" if ctl else "FORWARD",
-                             "son": son, "sio": sio, "foils": foils, "target": int(erpm),
+                             "run": run, "arme": int(self._arme),
+                             "son": son, "sio": sio, "foils": foils, "target": self._target,
                              "ramped": int(erpm), "esc": escs, "cmode": "ERPM",
-                             "bat_cap": int(self._cap),
+                             "bat_cap": int(self._cap), "cr": cr,
                              "imu": imu, "gps": gps, "pil": pil})
 
 
