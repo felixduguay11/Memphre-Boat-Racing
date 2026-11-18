@@ -2,7 +2,7 @@
 """
 config.py — tout ce qui se regle sans toucher au code de l'UI.
 
-Ajouter une metrique = ajouter une ligne dans TOP_METRICS.
+Ajouter une metrique = ajouter une ligne dans TOP_METRICS (carte V | A | W).
 Ajouter un ESC = ajouter son id dans ESC_IDS.
 """
 
@@ -121,7 +121,11 @@ TOP_METRICS: List[Metric] = [
     Metric("Puissance", lambda d: "%d"   % round(power_w(d)), "W"),
 ]
 
-TOP_COLUMNS = 3
+TOP_COLUMNS = 3              # ancien affichage (une carte par valeur)
+
+# Rangee du haut de la page Moteurs : TOP_METRICS dans une seule carte
+# (moitie gauche) et la charge du BMS en barre (moitie droite).
+CHARGE_LABEL = "Charge"
 
 
 # ------------------------------------------------------------ carte par ESC
@@ -201,6 +205,16 @@ def target_text(d: dict) -> str:
     if mode == "DUTY":
         return "consigne %.1f %%" % (v / 10.0)
     return "consigne %d eRPM" % v
+
+
+def target_short(d: dict) -> str:
+    """Consigne sans le mot « consigne » (carte Vitesse de la page Moteurs).
+    Pendant une calibration du levier : la mesure du levier a la place."""
+    if calib_en_cours(d):
+        return "CALIB %s" % _pil(d).get("raw", "--")
+    if "target" not in d:
+        return "--"
+    return target_text(d).replace("consigne ", "")
 
 
 # ------------------------------------------------------------ calibration levier
@@ -411,3 +425,335 @@ def position_text(d: dict) -> str:
 def altitude_text(d: dict) -> str:
     g = _gps(d)
     return "%.1f m" % g["alt"] if g.get("alt_ok") else "--"
+
+
+# ------------------------------------------------------------ page Foils (sonars + servos)
+# Cles de la trame du firmware "Integration taille reel" (task_rpi.cpp) :
+#   "son":   {"av", "ag", "ad"}  distance des sonars, cm     (SONARS_ACTIFS)
+#   "sio":   {"av", "ag", "ad"}  sortie TOR, 1 = mesure valide
+#   "foils": {"on", "cmd": {av, ag, ad}, "h": {av, ag, ad}, "p", "r"}  (FOILS_ACTIFS)
+#            on = 1 en CONTROLE ; cmd = commande envoyee au servo (°) ;
+#            h = sortie du PID de hauteur, p / r = sorties PID pitch / roll.
+# Un bloc absent (option a 0 dans config.h) s'affiche "--" et
+# "absent de la trame" : jamais une valeur inventee.
+FOILS_PAGE_LABEL = "Foils"
+
+@dataclass(frozen=True)
+class FoilChannel:
+    key: str            # cle dans son / sio / foils.cmd
+    label: str          # titre de la carte
+
+
+# Ordre d'affichage, de gauche a droite (vue de l'arriere du bateau)
+FOIL_CHANNELS: List[FoilChannel] = [
+    FoilChannel("ag", "Arr. gauche"),
+    FoilChannel("av", "Avant"),
+    FoilChannel("ad", "Arr. droit"),
+]
+
+# Memes valeurs que SERVO_xxx_NEUTRAL / _MIN / _MAX de config.h (affichage)
+SERVO_NEUTRAL = {"av": 148, "ag": 148, "ad": 148}
+SERVO_MIN = {"av": 120, "ag": 120, "ad": 120}
+SERVO_MAX = {"av": 163, "ag": 163, "ad": 163}
+SONAR_UNIT = "cm"
+SERVO_UNIT = "°"
+
+
+def _son(d: dict) -> dict:
+    return d.get("son") or {}
+
+
+def _foils(d: dict) -> dict:
+    return d.get("foils") or {}
+
+
+def sonar_text(d: dict, key: str) -> str:
+    v = _son(d).get(key)
+    return "--" if v is None else "%.0f" % v
+
+
+def sonar_status(d: dict, key: str):
+    """(texte, ok) ; ok = None si l'information est absente."""
+    if "son" not in d:
+        return "Sonar : absent", None
+    io = (d.get("sio") or {}).get(key)
+    if io is None:
+        return "Sonar : --", None
+    return ("Sonar : OK", True) if io else ("Sonar : NON VALIDE", False)
+
+
+def servo_value(d: dict, key: str):
+    """Commande du servo en degres, ou None."""
+    return (_foils(d).get("cmd") or {}).get(key)
+
+
+def servo_text(d: dict, key: str) -> str:
+    v = servo_value(d, key)
+    if v is None:
+        return "Servo : --"
+    return "Servo %.0f°  (%+.0f)" % (v, v - SERVO_NEUTRAL.get(key, 0))
+
+
+def servo_pct(d: dict, key: str):
+    """Position de la commande entre min (0) et max (100), ou None."""
+    v = servo_value(d, key)
+    if v is None:
+        return None
+    lo, hi = SERVO_MIN.get(key, 0), SERVO_MAX.get(key, 180)
+    return max(0.0, min(100.0, (v - lo) * 100.0 / (hi - lo))) if hi > lo else None
+
+
+def foils_status(d: dict):
+    """(texte, ok) pour la ligne du bas de la page Foils."""
+    if "foils" not in d:
+        return "Foils : absent de la trame", None
+    if _foils(d).get("on"):
+        return "Foils : CONTROLE actif", True
+    return "Foils : servos au neutre", None
+
+
+def foils_info(d: dict) -> str:
+    """Sorties des PID pitch / roll (la hauteur se voit sur chaque servo)."""
+    f = _foils(d)
+    if not f:
+        return "sonars seuls" if "son" in d else "--"
+    parts = ["%s %+.1f" % (lab, f[k] + 0.0) for k, lab in (("p", "pitch"), ("r", "roll"))
+             if f.get(k) is not None]
+    return ("PID " + "   ".join(parts)) if parts else "--"
+
+
+# ------------------------------------------------------------ BMS (Bluetooth)
+# Le Pi lit le BMS ANT de la batterie directement en BLE (ui/bms.py).
+# L'app ANT BMS du telephone doit etre FERMEE : une seule connexion a la fois.
+BMS_ENABLED = True
+# Debut du nom Bluetooth (ANT-BLE16ZMUB, ANT@BLE22AAUB... -> "ANT").
+# Plus sur une fois connu : BMS_ADDRESS = "AA:BB:CC:DD:EE:FF" (ignore le nom).
+BMS_NAME_PREFIX = "ANT"
+BMS_ADDRESS = "32:7F:4D:74:87:EB"   # ANT-BLE24CBUB-0812 (notre batterie)
+
+# Deux batteries en meme temps (futures, une par BMS) : decommenter les
+# deux lignes BMS_ADDRESSES / BMS_MONTAGE. BMS_ADDRESS est alors ignore.
+# Le Pi se connecte aux deux BMS en parallele ; l'UI affiche le pire des
+# deux (charge la plus basse, temperature la plus haute, cellule la plus
+# basse) et le plafond 20 % part de la charge la plus basse.
+#BMS_ADDRESSES = []
+#BMS_ADDRESSES = ["87:85:96:56:B1:2E",    # ANT@BLE16ZNUB-3KM7 (batterie 1)
+#                 "84:66:2F:2E:86:38"]    # ANT@BLE16ZNUB-CF4J (batterie 2)
+# Branchement des deux packs : "parallele" (tensions egales, courants
+# additionnes) ou "serie" (tensions additionnees, meme courant).
+BMS_MONTAGE = "parallele"
+# "" = detection auto ; sinon "ant_bms" (recent) ou "ant_leg_bms" (ancien)
+BMS_TYPE = ""
+BMS_SECRET = ""             # mot de passe BLE si le BMS en a un, sinon vide
+BMS_PERIOD_S = 1.0          # une lecture par seconde suffit
+BMS_STALE_S = 5.0           # au-dela : "--" a l'ecran, jamais une vieille valeur
+
+# Alarmes BMS (a ajuster selon la chimie du pack)
+# Charge batterie (% du BMS) :
+#   > BMS_WARN_SOC          barre verte
+#   <= BMS_WARN_SOC         barre jaune + "Attention" en rouge
+#   <= BMS_CAP_SOC          barre rouge + vitesse plafonnee : le Pi envoie
+#                           BATT_BASSE_PAYLOAD et le Teensy limite la
+#                           consigne a BATT_BASSE_PCT % du max (config.h).
+# Le plafond n'est demande qu'apres BMS_CAP_CONFIRM mesures de suite sous
+# le seuil (une lecture BLE aberrante ne bride pas le bateau), puis il est
+# renvoye a chaque mesure (le Teensy l'oublie s'il redemarre). Il est
+# leve (BATT_OK_PAYLOAD) quand la charge remonte a BMS_CAP_SOC +
+# BMS_CAP_REARM (batterie changee ou rechargee).
+# NB : {"cmd":"stop"} n'arrete PAS les moteurs (seulement la telemetrie).
+BMS_WARN_SOC = 30           # %
+BMS_CAP_SOC = 20            # %
+BMS_CAP_CONFIRM = 2         # mesures consecutives (1 mesure / BMS_PERIOD_S)
+BMS_CAP_REARM = 3           # %
+BATT_BASSE_PCT = 20         # meme valeur que BATT_BASSE_PCT de config.h (affichage)
+BATT_BASSE_PAYLOAD = {"cmd": "batt_basse"}
+BATT_OK_PAYLOAD = {"cmd": "batt_ok"}
+CHARGE_WARN_TEXT = "Attention"
+CHARGE_CAP_TEXT = "Vitesse limitee"
+BMS_CELL_MIN_V = 3.30       # V, Li-ion NMC 18S (2.90 pour du LiFePO4)
+BMS_DELTA_MAX_V = 0.10      # V, ecart max entre cellules
+# Temperature batterie : affichee "TEMP : OK" / "NOT OK xx°C" sur la page
+# Moteurs, comme les ESC (meme hysteresis TEMP_HYST : retour a OK sous
+# BMS_TEMP_MAX - TEMP_HYST).
+# Max du pack : 54 °C. L'alerte tombe 4 °C avant pour laisser au pilote
+# le temps de reduire avant d'atteindre la limite.
+BMS_TEMP_LIMITE = 54.0      # °C, maximum du pack (info)
+BMS_TEMP_MAX = 50.0         # °C, seuil d'alerte
+BMS_TEMP_LABEL = "TEMP"
+
+
+def bms_temp_text(t: float, ok: bool) -> str:
+    """Comme temp_text des ESC, en plus court quand ce n'est pas OK
+    (la place est partagee avec "Attention" / "Limite 20 %")."""
+    return "%s : OK" % BMS_TEMP_LABEL if ok else "NOT OK %.0f°C" % t
+
+
+def bms_log_record(sample: dict) -> dict:
+    """Mesure BMS telle qu'ecrite dans le log de session.
+    Cellules et sondes en dict ({"1": 3.71, ...}) : l'outil analyse/
+    les eclate en colonnes bms.cell.1, bms.cell.2... tracables."""
+    rec = {k: v for k, v in sample.items() if k not in ("cell_voltages", "temp_values")}
+    cells = sample.get("cell_voltages") or []
+    temps = sample.get("temp_values") or []
+    if cells:
+        rec["cell"] = {str(i + 1): v for i, v in enumerate(cells)}
+        rec["cell_min"] = min(cells)
+        rec["cell_max"] = max(cells)
+    if temps:
+        rec["temp"] = {str(i + 1): v for i, v in enumerate(temps)}
+        rec["temp_max"] = max(temps)
+    return rec
+
+
+def bat_cap(d: dict):
+    """Plafond batterie confirme par le Teensy : True / False, ou None si
+    la trame ne contient pas la cle (ancien firmware ou pas de trame)."""
+    return None if "bat_cap" not in d else bool(d["bat_cap"])
+
+
+def bms_temp(d: dict):
+    """Temperature batterie la plus haute (BMS frais), ou None."""
+    b = bms(d)
+    t = b.get("temp_values") or []
+    if t:
+        return max(t)
+    return b.get("temperature")
+
+
+def bms_soc(d: dict):
+    """Charge en % (BMS frais), ou None."""
+    return bms(d).get("battery_level")
+
+
+def bms(d: dict) -> dict:
+    """Mesure BMS fraiche, ou {} si absente / perimee."""
+    b = d.get("bms") or {}
+    return b if b.get("ok") else {}
+
+
+def _cells(d: dict) -> list:
+    return bms(d).get("cell_voltages") or []
+
+
+def _bms_fmt(key: str, fmt: str):
+    def f(d):
+        v = bms(d).get(key)
+        return fmt % v if v is not None else "--"
+    return f
+
+
+def bms_cell_min(d):
+    c = _cells(d)
+    return "%.3f" % min(c) if c else "--"
+
+
+def bms_cell_max(d):
+    c = _cells(d)
+    return "%.3f" % max(c) if c else "--"
+
+
+def bms_temp_max(d):
+    t = bms(d).get("temp_values") or []
+    return "%.0f" % max(t) if t else _bms_fmt("temperature", "%.0f")(d)
+
+
+# Grande carte a gauche
+BMS_SOC = Metric("Charge batterie", _bms_fmt("battery_level", "%d"), "%")
+
+# Une ligne par valeur a droite
+BMS_METRICS: List[Metric] = [
+    Metric("Tension",   _bms_fmt("voltage", "%.1f"), "V"),
+    Metric("Courant",   _bms_fmt("current", "%+.1f"), "A"),
+    Metric("Cell min",  bms_cell_min, "V"),
+    Metric("Cell max",  bms_cell_max, "V"),
+    Metric("Temp max",  bms_temp_max, "°C"),
+]
+
+
+def bms_status(d: dict):
+    """(texte, ok) pour la ligne du bas ; ok = None si pas de donnee."""
+    b = d.get("bms")
+    if not b:
+        return "BMS : pas de lien", None
+    if not b.get("ok"):
+        return "BMS : donnees perimees", False
+    alarmes = []
+    soc = b.get("battery_level")
+    if soc is not None and soc <= BMS_CAP_SOC:
+        alarmes.append("vitesse limitee")
+    elif soc is not None and soc <= BMS_WARN_SOC:
+        alarmes.append("charge basse")
+    c = b.get("cell_voltages") or []
+    if c and min(c) < BMS_CELL_MIN_V:
+        alarmes.append("cellule basse")
+    dv = b.get("delta_voltage")
+    if dv is not None and dv > BMS_DELTA_MAX_V:
+        alarmes.append("desequilibre")
+    t = b.get("temp_values") or []
+    if t and max(t) >= BMS_TEMP_MAX:
+        alarmes.append("chaud")
+    if b.get("dischrg_mosfet") is False:
+        alarmes.append("decharge coupee")
+    if b.get("problem") or b.get("problem_code"):
+        alarmes.append("defaut %s" % b.get("problem_code", ""))
+    if alarmes:
+        return "BMS : " + ", ".join(alarmes), False
+    return "BMS : OK", True
+
+
+def bms_combine(samples: list, montage: str = None) -> dict:
+    """Plusieurs packs -> une mesure. Securite d'abord : charge la plus
+    basse, temperature la plus haute, toutes les cellules ensemble."""
+    montage = montage or BMS_MONTAGE
+    if len(samples) == 1:
+        return dict(samples[0])
+
+    def vals(k):
+        return [s[k] for s in samples if s.get(k) is not None]
+
+    out = {"packs": [{"soc": s.get("battery_level"), "v": s.get("voltage"),
+                      "i": s.get("current")} for s in samples]}
+    v, i = vals("voltage"), vals("current")
+    if v:
+        out["voltage"] = sum(v) if montage == "serie" else sum(v) / len(v)
+    if i:
+        out["current"] = sum(i) / len(i) if montage == "serie" else sum(i)
+    if vals("power"):
+        out["power"] = sum(vals("power"))
+    if vals("battery_level"):
+        out["battery_level"] = min(vals("battery_level"))
+    if vals("cycle_charge"):
+        c = vals("cycle_charge")
+        out["cycle_charge"] = min(c) if montage == "serie" else sum(c)
+    cells = [c for s in samples for c in (s.get("cell_voltages") or [])]
+    if cells:
+        out["cell_voltages"] = cells
+        out["delta_voltage"] = max(cells) - min(cells)
+    temps = [t for s in samples for t in (s.get("temp_values") or [])]
+    if temps:
+        out["temp_values"] = temps
+    if vals("temperature"):
+        out["temperature"] = max(vals("temperature"))
+    for k in ("chrg_mosfet", "dischrg_mosfet"):
+        if vals(k):
+            out[k] = all(vals(k))
+    out["problem"] = any(vals("problem"))
+    out["problem_code"] = 0
+    for c in vals("problem_code"):
+        out["problem_code"] |= int(c)
+    return out
+
+
+def bms_info(d: dict) -> str:
+    b = bms(d)
+    if not b:
+        return "--"
+    parts = ["P%d %s %%" % (n + 1, "--" if p.get("soc") is None else p["soc"])
+             for n, p in enumerate(b.get("packs") or [])]
+    if b.get("delta_voltage") is not None:
+        parts.append("ecart %d mV" % round(b["delta_voltage"] * 1000))
+    if b.get("power") is not None:
+        parts.append("%d W" % round(b["power"]))
+    if b.get("cycle_charge") is not None:
+        parts.append("%.1f Ah" % b["cycle_charge"])
+    return "   ".join(parts) or "--"

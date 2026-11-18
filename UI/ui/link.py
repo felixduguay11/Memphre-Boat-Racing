@@ -144,6 +144,8 @@ class SimLink(BaseLink):
     SIM_VIT_ERPM_MAX = 8000
     SIM_VIT_ECART_MAX = 1200
     SIM_UI_TIMEOUT_S = 1.0
+    SIM_ERPM_MAX_FORWARD = 16000    # ERPM_MAX_FORWARD
+    SIM_BATT_BASSE_PCT = 20         # BATT_BASSE_PCT
     # Modele du bateau
     SIM_ERPM_PAR_KMH = 380.0    # sessions 24 / 28
     SIM_TAU_S = 2.0             # retard de la vitesse sur le regime
@@ -161,6 +163,7 @@ class SimLink(BaseLink):
         self._arme = True           # levier arme (False : consigne 0 jusqu'au repos)
         self._t_sortie = 0.0        # instant de la sortie du cruise
         self._target, self._ramped, self._v = 0, 0.0, 0.0
+        self._cap = False                 # plafond batterie basse (comme le Teensy)
         self._timer = QTimer(self)
         self._timer.setInterval(period_ms)
         self._timer.timeout.connect(self._tick)
@@ -192,6 +195,8 @@ class SimLink(BaseLink):
             self._cal, self._cres = False, 4
         elif cmd == "escconf":
             QTimer.singleShot(100, self._emit_escconf)
+        elif cmd in ("batt_basse", "batt_ok"):
+            self._cap = cmd == "batt_basse"
         self.status.emit("recu: %s" % json.dumps(obj))
 
     def _cruise_cmd(self, cmd: str):
@@ -239,8 +244,10 @@ class SimLink(BaseLink):
             self._cr_t = int((time.monotonic() - self._cr_t0) * 1000)
         else:
             self._target = int(levier) if self._arme else 0
-        # Task_Propulsion : rampe
+        # Task_Propulsion : plafond batterie basse (EVT_BATT_BASSE), puis rampe
         t, r = self._target, self._ramped
+        if self._cap:
+            t = min(t, self.SIM_ERPM_MAX_FORWARD * self.SIM_BATT_BASSE_PCT // 100)
         if t == 0:
             r = 0.0
         else:
@@ -306,14 +313,32 @@ class SimLink(BaseLink):
         pil = {"raw": raw, "cal": int(self._cal), "cal_res": self._cres,
                "lmin": 300, "lmax": 700, "cmin": self._cmin if self._cal else 0,
                "cmax": self._cmax if self._cal else 0}
+        # Sonars + foils (blocs envoyes si SONARS_ACTIFS / FOILS_ACTIFS) :
+        # CONTROLE une periode sur deux, sonar avant non valide de temps en temps
+        ctl = (n // 200) % 2 == 1
+        son, sio, cmd, h = {}, {}, {}, {}
+        for k, (key, ph) in enumerate((("av", 0.0), ("ag", 1.3), ("ad", 2.6))):
+            son[key] = round(70.0 + 18.0 * math.sin(n / 22.0 + ph), 1)
+            sio[key] = 0 if key == "av" and n % 150 > 135 else 1
+            h[key] = round((70.0 - son[key]) * 0.4, 2) if ctl else 0.0
+            cmd[key] = round(min(163.0, max(120.0, 148.0 + h[key] * 1.5)), 1)
+        p_out = round(math.sin(n / 30.0) * 2.0, 2) if ctl else 0.0
+        r_out = round(math.sin(n / 18.0) * 3.0, 2) if ctl else 0.0
+        foils = {"on": int(ctl), "cmd": cmd, "h": h, "p": p_out, "r": r_out}
         cr = {"m": self._cr, "t": self._cr_t, "fin": self._cr_fin,
               "erpm": self.SIM_CRUISE_ERPM, "kmh": self.SIM_CRUISE_KMH}
-        run = "CRUISE" if self._cr else ("FORWARD" if self._arme else "NEUTRAL")
+        if self._cr:
+            run = "CRUISE"                      # foils actifs aussi en CRUISE (EVT_CONTROLE)
+        elif not self._arme:
+            run = "NEUTRAL"                     # apres une sortie du cruise
+        else:
+            run = "CONTROLE" if ctl else "FORWARD"
         self.telemetry.emit({"t": n * self._timer.interval(), "mode": "RUN",
                              "run": run, "arme": int(self._arme),
-                             "target": self._target,
+                             "son": son, "sio": sio, "foils": foils, "target": self._target,
                              "ramped": int(erpm), "esc": escs, "cmode": "ERPM",
-                             "cr": cr, "imu": imu, "gps": gps, "pil": pil})
+                             "bat_cap": int(self._cap), "cr": cr,
+                             "imu": imu, "gps": gps, "pil": pil})
 
 
 def make_link(port: str, baud: int, esc_ids, simulated: bool) -> BaseLink:

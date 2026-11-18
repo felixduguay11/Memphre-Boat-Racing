@@ -47,6 +47,17 @@ UNITS = {
     "t":      ("Temps",              "Temps",       "s"),
     "t_pi":   ("Temps Pi",           "Temps",       "s"),
     "ok":     ("Statut ESC",         "Statut",      ""),
+    # BMS (lignes "type": "bms" du log, colonnes bms.xxx)
+    "voltage":       ("Tension pack",        "Tension",     "V"),
+    "current":       ("Courant pack",        "Courant",     "A"),
+    "power":         ("Puissance pack",      "Puissance",   "W"),
+    "battery_level": ("Charge",              "Charge",      "%"),
+    "cell_min":      ("Cellule min",         "Tension",     "V"),
+    "cell_max":      ("Cellule max",         "Tension",     "V"),
+    "delta_voltage": ("Ecart cellules",      "Tension",     "V"),
+    "temp_max":      ("Temperature max",     "Température", "°C"),
+    "temperature":   ("Temperature BMS",     "Température", "°C"),
+    "cycle_charge":  ("Capacite restante",   "Capacité",    "Ah"),
 }
 
 

@@ -81,6 +81,10 @@ void Task_Propulsion(void *ptr)
             target = iclamp(target, -CMD_MAX_SURCHAUFFE, CMD_MAX_SURCHAUFFE);
         }
 #endif
+        // Batterie basse (demandé par le Pi d'après le BMS)
+        if (bits & EVT_BATT_BASSE) {
+            target = iclamp(target, -CMD_MAX_BATT_REV, CMD_MAX_BATT_FWD);
+        }
 
         // 3) Rampe + envoi aux VESC
         AppliquerConsigne(target);
@@ -100,5 +104,7 @@ void Task_Propulsion(void *ptr)
     }
 }
 
+static_assert(CMD_MAX_BATT_FWD <= CMD_MAX_FORWARD && CMD_MAX_BATT_REV <= CMD_MAX_REVERSE,
+              "BATT_BASSE_PCT doit rester entre 0 et 100");
 static_assert(CMD_MAX_SURCHAUFFE >= CMD_MIN_UTILE,
               "le plafond de surchauffe doit rester dans la plage utile");

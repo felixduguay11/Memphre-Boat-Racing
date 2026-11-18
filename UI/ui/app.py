@@ -2,6 +2,7 @@
 """app.py — assemble transport et ecrans."""
 
 import sys
+import time
 import argparse
 
 from PySide6.QtCore import Qt, QTimer
@@ -11,7 +12,9 @@ from PySide6.QtWidgets import QApplication, QStackedWidget
 from . import config as cfg
 from . import theme
 from .link import make_link
-from .screens import StartScreen, TelemetryScreen, XsensScreen, FlashScreen, CalibScreen
+from .screens import (StartScreen, TelemetryScreen, XsensScreen, BmsScreen,
+                      FoilsScreen, FlashScreen, CalibScreen)
+from .bms import make_bms
 from .flasher import TeensyFlasher
 from .logger import TelemetryLogger
 from .esc_params import EscParamsChecker
@@ -19,24 +22,46 @@ from .esc_popup import EscParamsPopup
 
 
 class MainWindow(QStackedWidget):
-    def __init__(self, link, title="Hydrofoil"):
+    def __init__(self, link, title="Hydrofoil", bms=None):
         super().__init__()
         self.link = link
+        self.bms = bms
 
         self.start_screen = StartScreen()
         self.telemetry_screen = TelemetryScreen()
         self.xsens_screen = XsensScreen()
+        self.bms_screen = BmsScreen()
+        self.foils_screen = FoilsScreen()
         self.flash_screen = FlashScreen()
         self.calib_screen = CalibScreen()
         self.addWidget(self.start_screen)
         self.addWidget(self.telemetry_screen)
         self.addWidget(self.xsens_screen)
+        self.addWidget(self.bms_screen)
+        self.addWidget(self.foils_screen)
         self.addWidget(self.flash_screen)
         self.addWidget(self.calib_screen)
 
         # Pages de telemetrie (onglets), toutes alimentees par la trame
-        self._pages = {"moteurs": self.telemetry_screen, "xsens": self.xsens_screen}
+        self._pages = {"moteurs": self.telemetry_screen, "xsens": self.xsens_screen,
+                       "bms": self.bms_screen, "foils": self.foils_screen}
         self._streaming = False
+
+        # BMS : derniere mesure, ajoutee a chaque trame du Teensy sous "bms"
+        self._bms = None            # dernier echantillon recu
+        self._bms_t = 0.0           # heure de reception (monotonic)
+        self._bms_low_n = 0         # mesures consecutives sous BMS_CAP_SOC
+        self._bat_cap = False       # plafond batterie demande au Teensy
+        self._packs = {}            # plusieurs BMS : n -> (mesure, heure)
+        self._last_frame = {}
+        if self.bms is not None:
+            self.bms.sample.connect(self._on_bms)
+        # Rafraichit la page BMS meme si le Teensy n'envoie rien
+        # (et fait passer a "--" une mesure perimee).
+        self._bms_timer = QTimer(self)
+        self._bms_timer.setInterval(1000)
+        self._bms_timer.timeout.connect(self._refresh_bms_page)
+        self._bms_timer.start()
 
         self._link_released = False
         self.flasher = TeensyFlasher(
@@ -109,14 +134,86 @@ class MainWindow(QStackedWidget):
         if d.get("type") == "escconf":
             self._on_escconf(d)
             return
+        self._last_frame = d
+        view = self._with_bms(d)
         # Toutes les pages sont a jour : changer d'onglet n'affiche
         # jamais une valeur perimee. Le log tourne quel que soit l'onglet.
         if self._streaming:
             for page in self._pages.values():
-                page.update_data(d)
-            self.logger.write(d)
+                page.update_data(view)
+            self.logger.write(d)            # le BMS a ses propres lignes
         elif self.currentWidget() is self.calib_screen:
             self.calib_screen.update_data(d)
+
+    # ------------------------------------------------------------ BMS
+    def _on_bms(self, sample: dict):
+        now = time.monotonic()
+        k = sample.pop("_pack", None)
+        if k is None:                       # une seule batterie
+            self._bms, self._bms_t = sample, now
+            # Log : une ligne par mesure BMS (1 Hz), a part des trames Teensy
+            self.logger.write({"type": "bms", "bms": cfg.bms_log_record(sample)})
+        else:                               # plusieurs batteries
+            self._packs[k] = (sample, now)
+            self.logger.write({"type": "bms", "bms%d" % (k + 1): cfg.bms_log_record(sample)})
+            n = getattr(self.bms, "n", len(self._packs))
+            if len(self._packs) < n:
+                return                      # on attend une mesure de chaque pack
+            packs = [self._packs[i] for i in sorted(self._packs)]
+            self._bms = cfg.bms_combine([p for p, _ in packs])
+            # Age = celui du pack le plus vieux : un BMS muet rend tout perime
+            self._bms_t = min(t for _, t in packs)
+            if now - self._bms_t >= cfg.BMS_STALE_S:
+                return                      # pas de plafond sur une donnee perimee
+        self._check_bms_cap(self._bms.get("battery_level"))
+
+    def _check_bms_cap(self, soc):
+        """Plafond de consigne quand la charge tombe a BMS_CAP_SOC.
+        Pas d'arret : le pilote doit pouvoir rentrer au quai."""
+        if soc is None:
+            return
+        if soc > cfg.BMS_CAP_SOC:
+            self._bms_low_n = 0
+            if self._bat_cap and soc >= cfg.BMS_CAP_SOC + cfg.BMS_CAP_REARM:
+                self._bat_cap = False
+                self.link.send(cfg.BATT_OK_PAYLOAD)
+                self.logger.write({"type": "evt", "evt": "bat_cap_off", "soc": soc})
+                self.start_screen.set_message("")
+                print("[bms] charge %d %% : plafond leve" % soc)
+            return
+        self._bms_low_n += 1
+        if self._bms_low_n < cfg.BMS_CAP_CONFIRM:
+            return
+        # Renvoye a chaque mesure : le Teensy l'oublie s'il redemarre
+        self.link.send(cfg.BATT_BASSE_PAYLOAD)
+        if not self._bat_cap:
+            self._bat_cap = True
+            msg = "Batterie a %d %% : vitesse limitee a %d %%" % (soc, cfg.BATT_BASSE_PCT)
+            print("[bms]", msg)
+            self.logger.write({"type": "evt", "evt": "bat_cap_on", "soc": soc})
+            self.start_screen.set_message(msg)
+
+    def _bms_view(self):
+        if self._bms is None:
+            return None
+        age = time.monotonic() - self._bms_t
+        v = dict(self._bms)
+        v["ok"] = int(age < cfg.BMS_STALE_S)
+        v["age"] = round(age, 1)
+        return v
+
+    def _with_bms(self, d: dict) -> dict:
+        b = self._bms_view()
+        if b is None:
+            return d
+        out = dict(d)
+        out["bms"] = b
+        return out
+
+    def _refresh_bms_page(self):
+        page = self.currentWidget()
+        if page in (self.bms_screen, self.telemetry_screen):
+            page.update_bms(self._with_bms(self._last_frame))
 
     # ------------------------------------------------------------ parametres ESC
     def _keep_popup_on_top(self, _index):
@@ -213,6 +310,8 @@ def parse_args(argv=None):
     ap.add_argument("--baud", type=int, default=cfg.BAUD)
     ap.add_argument("--sim", action="store_true", help="donnees simulees")
     ap.add_argument("--windowed", action="store_true", help="fenetre au lieu du plein ecran")
+    ap.add_argument("--bms-sim", action="store_true", help="BMS simule (sans Bluetooth)")
+    ap.add_argument("--no-bms", action="store_true", help="ne pas se connecter au BMS")
     return ap.parse_args(argv)
 
 
@@ -225,10 +324,19 @@ def main(argv=None):
     link = make_link(args.port, args.baud, cfg.ESC_IDS, args.sim)
     link.status.connect(lambda s: print("[link]", s))
 
-    win = MainWindow(link, "Hydrofoil" + (" (sim)" if args.sim else ""))
+    bms = None
+    if cfg.BMS_ENABLED and not args.no_bms:
+        bms = make_bms(cfg, args.bms_sim)
+        bms.status.connect(lambda s: print("[bms]", s))
+
+    win = MainWindow(link, "Hydrofoil" + (" (sim)" if args.sim else ""), bms)
     link.start_link()
+    if bms is not None:
+        bms.start_link()
 
     win.show() if args.windowed else win.showFullScreen()
     code = app.exec()
+    if bms is not None:
+        bms.stop_link()
     link.stop_link()
     return code

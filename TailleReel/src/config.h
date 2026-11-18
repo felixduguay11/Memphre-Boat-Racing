@@ -10,6 +10,15 @@
 //     CONTROLE est inatteignable. Xsens reste actif (logging
 //     GPS / attitude envoyé au Raspberry Pi).
 #define FOILS_ACTIFS    0
+
+// 1 = sonars lus et envoyés au Pi (blocs "son" / "sio") même sans
+//     foils : sert à vérifier les sonars à quai ou bateau à l'eau,
+//     servos NON commandés. Forcé à 1 quand FOILS_ACTIFS = 1.
+#define SONARS_ACTIFS   0
+#if FOILS_ACTIFS
+#undef  SONARS_ACTIFS
+#define SONARS_ACTIFS   1
+#endif
 //====================================//
 
 //------------- BAUDRATES ------------//
@@ -310,6 +319,14 @@
 #define TEMP_HYST           3.0f     // °C
 #define ERPM_MAX_SURCHAUFFE 18000     // plafond de consigne en surchauffe
 
+// Batterie basse — commande du Pi ({"cmd":"batt_basse"} / {"cmd":"batt_ok"}).
+// Le Pi lit le BMS en Bluetooth ; sous BMS_STOP_SOC (config.py, 20 %)
+// il demande ce plafond : la consigne est limitée à BATT_BASSE_PCT % de
+// la consigne max, dans les deux sens. Le plafond reste actif jusqu'au
+// "batt_ok" du Pi (batterie changée) ; il est perdu si le Teensy
+// redémarre, d'où le renvoi par le Pi à chaque mesure (1 Hz).
+#define BATT_BASSE_PCT      20       // % de CMD_MAX_FORWARD / CMD_MAX_REVERSE
+
 // ── Consigne générique selon MODE_COMMANDE (ne pas modifier) ──
 #if MODE_COMMANDE == MODE_ERPM
   #define CMD_NOM            "ERPM"
@@ -328,6 +345,13 @@
 #else
   #error "MODE_COMMANDE invalide : MODE_ERPM ou MODE_DUTY seulement (contrôle en courant retiré)"
 #endif
+
+// Plafonds batterie basse (jamais sous CMD_MIN_UTILE : le moteur doit
+// pouvoir tourner pour rentrer au quai)
+#define _BATT_CAP(m)        (((m) * BATT_BASSE_PCT / 100) > CMD_MIN_UTILE ? \
+                             ((m) * BATT_BASSE_PCT / 100) : CMD_MIN_UTILE)
+#define CMD_MAX_BATT_FWD    _BATT_CAP(CMD_MAX_FORWARD)
+#define CMD_MAX_BATT_REV    _BATT_CAP(CMD_MAX_REVERSE)
 //------------------------------------//
 
 

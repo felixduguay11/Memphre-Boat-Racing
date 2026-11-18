@@ -16,6 +16,7 @@
 //                  {"cmd":"escconf"} (renvoi des paramètres des VESC)
 //                  {"cmd":"cruise_erpm"} / {"cmd":"cruise_vitesse"} /
 //                  {"cmd":"cruise_off"} / {"cmd":"cruise_vie"} (cruise control)
+//                  {"cmd":"batt_basse"} / {"cmd":"batt_ok"} (plafond batterie basse)
 //    Teensy → Pi : télémétrie JSON à 20 Hz si streaming,
 //                  sinon {"type":"hb",...} toutes les HB_MS.
 //                  {"type":"escconf",...} dès qu'une config de VESC

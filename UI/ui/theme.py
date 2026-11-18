@@ -20,6 +20,8 @@ PALETTES = {
         "ok_fg":     "#57d9a3",
         "ko_bg":     "#3a1c1c",
         "ko_fg":     "#f08a8a",
+        "warn":      "#f2c94c",
+        "alert":     "#ff2d2d",
         "danger":    "#bb4444",
         "danger_bg": "#331a1a",
         "danger_fg": "#ff9b9b",
@@ -39,6 +41,8 @@ PALETTES = {
         "ok_fg":     "#0d6b43",
         "ko_bg":     "#fbdada",
         "ko_fg":     "#a51d1d",
+        "warn":      "#e6b800",
+        "alert":     "#e00000",
         "danger":    "#c0392b",
         "danger_bg": "#fbe3e3",
         "danger_fg": "#a01c1c",
@@ -53,7 +57,7 @@ _TEMPLATE = """
 QWidget        {{ background:{bg}; color:{text}; font-family:"{font}"; }}
 QLabel#title   {{ font-size:32px; font-weight:600; }}
 QLabel#hint    {{ font-size:20px; color:{muted}; }}
-QLabel#barHint {{ font-size:18px; color:{muted}; }}
+QLabel#barHint {{ font-size:14px; color:{muted}; }}
 QLabel#pill    {{ font-size:22px; font-weight:600; padding:6px 14px; border-radius:16px;
                   background:{ok_bg}; color:{ok_fg}; }}
 QLabel#pillKo  {{ font-size:22px; font-weight:600; padding:6px 14px; border-radius:16px;
@@ -68,6 +72,22 @@ QLabel#escValue  {{ font-size:72px; font-weight:600; }}
 QLabel#speedValue {{ font-size:150px; font-weight:600; }}
 QLabel#speedUnit  {{ font-size:32px; color:{muted}; }}
 QLabel#speedMid   {{ font-size:80px; font-weight:600; }}
+QLabel#speedSubLabel {{ font-size:18px; color:{muted}; }}
+QLabel#speedSub   {{ font-size:26px; font-weight:600; }}
+QLabel#multiValue {{ font-size:34px; font-weight:600; }}
+QLabel#multiUnit  {{ font-size:18px; color:{muted}; }}
+QLabel#chargeValue {{ font-size:40px; font-weight:600; }}
+QLabel#chargePct   {{ font-size:30px; font-weight:600; }}
+QLabel#chargeAlert {{ font-size:26px; font-weight:700; color:{alert}; }}
+QLabel#startAlert  {{ font-size:24px; font-weight:700; color:{alert}; }}
+QProgressBar {{ background:{line}; border:none; border-radius:8px; }}
+QProgressBar#chargeOk::chunk   {{ background:{ok_fg};  border-radius:8px; }}
+QProgressBar#chargeMid::chunk  {{ background:{warn};   border-radius:8px; }}
+QProgressBar#chargeLow::chunk  {{ background:{danger}; border-radius:8px; }}
+QProgressBar#chargeNone::chunk {{ background:transparent; }}
+QProgressBar#servoBar::chunk   {{ background:{accent}; border-radius:8px; }}
+QProgressBar#servoNone::chunk  {{ background:transparent; }}
+QLabel#servoText  {{ font-size:22px; font-weight:500; }}
 QLabel#rowValue   {{ font-size:50px; font-weight:600; }}
 QLabel#smallValue {{ font-size:24px; font-weight:500; }}
 QLabel#statusOk   {{ font-size:19px; color:{ok_fg}; padding:2px 10px; }}

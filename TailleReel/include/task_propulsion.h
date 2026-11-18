@@ -12,6 +12,7 @@
 //    - commande plus vieille que PROP_CMD_TIMEOUT_MS → 0
 //    - EVT_ERR_CRITIQUE (watchdog)                  → 0
 //    - EVT_SURCHAUFFE   (watchdog) → plafond ±CMD_MAX_SURCHAUFFE
+//    - EVT_BATT_BASSE   (Pi, BMS)  → plafond CMD_MAX_BATT_FWD / _REV
 // =====================================================
 
 #include <arduino_freertos.h>

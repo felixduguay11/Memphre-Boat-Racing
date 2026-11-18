@@ -10,7 +10,8 @@ from PySide6.QtWidgets import (
 )
 
 from . import config as cfg
-from .widgets import Card, RowCard, SpeedCard, Badge, EscCard, set_status_style
+from .widgets import (Card, RowCard, SpeedCard, Badge, EscCard, MultiCard, ChargeCard,
+                      FoilCard, set_status_style)
 from .cruise_popup import CruisePopup
 
 CENTER = Qt.AlignmentFlag.AlignCenter
@@ -25,7 +26,37 @@ def _close_button(slot) -> QPushButton:
 
 
 # Pages de telemetrie, dans l'ordre des onglets
-PAGES = [("moteurs", "Moteurs"), ("xsens", "Xsens")]
+PAGES = [("moteurs", "Moteurs"), ("xsens", "Xsens"), ("bms", "BMS"),
+         ("foils", cfg.FOILS_PAGE_LABEL)]
+
+
+class _FitLabel(QLabel):
+    """Texte entier s'il tient, sinon sans le mot « consigne », sinon
+    rien : jamais un bout de texte coupe. Avec 4 onglets il n'y a plus
+    la place : la consigne est dans la carte Vitesse de la page Moteurs.
+    Recalcule a chaque changement de texte et de largeur."""
+
+    def __init__(self, text=""):
+        super().__init__(text)
+        self._full = text
+
+    def set_full(self, text: str):
+        self._full = text
+        self._fit()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._fit()
+
+    def _fit(self):
+        w, fm = self.width(), self.fontMetrics()
+        for t in (self._full, self._full.replace("consigne ", "")):
+            if fm.horizontalAdvance(t) <= w:
+                if self.text() != t:
+                    self.setText(t)
+                return
+        if self.text():
+            self.setText("")
 
 
 class _PageBar(QHBoxLayout):
@@ -38,10 +69,10 @@ class _PageBar(QHBoxLayout):
         for key, text in PAGES:
             b = QPushButton(text)
             b.setObjectName("tabOn" if key == active else "tab")
-            b.setFixedSize(122, 50)
+            b.setFixedSize(112, 50)
             b.clicked.connect(lambda _=False, k=key: on_page(k))
             self.addWidget(b)
-        self.target = QLabel("--")
+        self.target = _FitLabel("--")
         self.target.setObjectName("barHint")
         # Si la place manque, c'est la consigne qui est rognee, jamais l'etat
         self.target.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -56,9 +87,12 @@ class _PageBar(QHBoxLayout):
         # Calibration du levier en cours (ex. lancee par la commande
         # secrete F/R) : on affiche la mesure a la place de la consigne.
         if cfg.calib_en_cours(d):
-            self.target.setText("CALIB " + cfg.calib_texte_mesure(d))
+            self._set_target("CALIB " + cfg.calib_texte_mesure(d))
         else:
-            self.target.setText(cfg.target_text(d))
+            self._set_target(cfg.target_text(d))
+
+    def _set_target(self, text: str):
+        self.target.set_full(text)
 
 
 def _stop_button(slot) -> QPushButton:
@@ -111,12 +145,22 @@ class StartScreen(QWidget):
         titre.setAlignment(CENTER)
         root.addWidget(titre)
 
+        # Message d'alerte (ex. arret automatique batterie basse)
+        self._msg = QLabel("")
+        self._msg.setObjectName("startAlert")
+        self._msg.setAlignment(CENTER)
+        self._msg.setWordWrap(True)
+        root.addWidget(self._msg)
+
         root.addStretch(2)
 
         go = QPushButton("Demarrer")
         go.setObjectName("primary")
         go.clicked.connect(lambda: self.started.emit(dict(self._payload)))
         root.addWidget(go)
+
+    def set_message(self, text: str):
+        self._msg.setText(text)
 
     def set_theme_label(self, current: str):
         """Le bouton annonce le theme vers lequel il bascule."""
@@ -203,11 +247,10 @@ class TelemetryScreen(QWidget):
     page_requested = Signal(str)
     cruise_requested = Signal(dict)     # commande a envoyer au Teensy
 
-    def __init__(self, metrics=None, esc_ids=None, columns: int = None):
+    def __init__(self, metrics=None, esc_ids=None):
         super().__init__()
         metrics = metrics or cfg.TOP_METRICS
         esc_ids = esc_ids or cfg.ESC_IDS
-        columns = columns or cfg.TOP_COLUMNS
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 12, 16, 12)
@@ -216,15 +259,16 @@ class TelemetryScreen(QWidget):
         self._bar = _PageBar("moteurs", self.page_requested.emit)
         root.addLayout(self._bar)
 
-        top = QGridLayout()
+        # Rangee du haut : V | A | W dans une carte (moitie gauche),
+        # charge batterie du BMS (moitie droite).
+        top = QHBoxLayout()
         top.setSpacing(8)
-        self._metrics = []
-        for n, m in enumerate(metrics):
-            c = Card(m.label, m.unit)
-            top.addWidget(c, n // columns, n % columns)
-            self._metrics.append((m, c))
-        for k in range(columns):
-            top.setColumnStretch(k, 1)              # colonnes de largeur egale
+        self._metrics = list(metrics)
+        self._power = MultiCard(self._metrics)
+        self._charge = ChargeCard(cfg.CHARGE_LABEL, cfg.BMS_WARN_SOC, cfg.BMS_CAP_SOC,
+                                  cfg.CHARGE_WARN_TEXT, cfg.CHARGE_CAP_TEXT)
+        top.addWidget(self._power, 1)
+        top.addWidget(self._charge, 1)
         root.addLayout(top)
 
         # Rangee du milieu : ESC | vitesse GPS | ESC (ordre de cfg.ESC_IDS)
@@ -232,12 +276,13 @@ class TelemetryScreen(QWidget):
         grid.setSpacing(8)
         self._esc_cards = {}
         self._temp_ok = {}      # (id ESC, cle) -> etat precedent, pour l'hysteresis
+        self._batt_temp_ok = True   # idem pour la temperature batterie
         cols = [0, 2]           # colonne 1 = vitesse
         for n, i in enumerate(esc_ids):
             c = EscCard("ESC %d" % i, cfg.esc_unit(), len(cfg.ESC_TEMPS))
             grid.addWidget(c, n // 2, cols[n % 2])
             self._esc_cards[i] = c
-        self._speed = SpeedCard(cfg.SPEED_LABEL_COURT, cfg.SPEED_UNIT)
+        self._speed = SpeedCard(cfg.SPEED_LABEL_COURT, cfg.SPEED_UNIT, sub_label="Consigne")
         self._speed.setFixedWidth(220)
         grid.addWidget(self._speed, 0, 1, max(1, (len(esc_ids) + 1) // 2), 1)
         grid.setColumnStretch(0, 1)
@@ -332,13 +377,17 @@ class TelemetryScreen(QWidget):
     def update_data(self, d: dict):
         self._bar.update_data(d)
         self._speed.set_value(cfg.speed_text(d))
+        self._speed.set_sub(cfg.target_short(d))
         self._update_cruise(d)
 
-        for m, card in self._metrics:
+        texts = []
+        for m in self._metrics:
             try:
-                card.set_value(m.value(d))
+                texts.append(m.value(d))
             except Exception:
-                card.set_value("--")
+                texts.append("--")
+        self._power.set_values(texts)
+        self.update_bms(d)
 
         seen = set()
         for e in d.get("esc", []) or []:
@@ -356,6 +405,29 @@ class TelemetryScreen(QWidget):
         for i, card in self._esc_cards.items():
             if i not in seen:
                 self._esc_offline(i, card, "absent de la trame")
+
+    def update_bms(self, d: dict):
+        """Barre de charge seule : appelee aussi quand le Teensy se tait.
+        Sous le seuil, le texte dit si le Teensy a bien applique le plafond."""
+        soc = cfg.bms_soc(d)
+        txt = None
+        if soc is not None and soc <= cfg.BMS_CAP_SOC:
+            cap = cfg.bat_cap(d)
+            if cap is None:
+                txt = "Limite ?"           # ancien firmware : pas de confirmation
+            elif not cap:
+                txt = "Limite en attente"
+            else:
+                txt = "Limite %d %%" % cfg.BATT_BASSE_PCT
+        self._charge.set_level(soc, txt)
+        t = cfg.bms_temp(d)
+        if t is None:
+            self._batt_temp_ok = True
+            self._charge.set_temp("%s : --" % cfg.BMS_TEMP_LABEL, None)
+        else:
+            self._batt_temp_ok = cfg.temp_ok(t, cfg.BMS_TEMP_MAX, self._batt_temp_ok)
+            self._charge.set_temp(cfg.bms_temp_text(t, self._batt_temp_ok),
+                                  self._batt_temp_ok)
 
     def _update_temps(self, esc_id, card, e: dict):
         for n, chk in enumerate(cfg.ESC_TEMPS):
@@ -450,6 +522,128 @@ class XsensScreen(QWidget):
             set_status_style(w, ok)
         self._pos.setText(cfg.position_text(d))
         self._alt.setText(cfg.altitude_text(d))
+
+
+class BmsScreen(QWidget):
+    """Page BMS : charge en tres gros, tension / courant / cellules /
+    temperature, etat et alarmes. Donnees lues en Bluetooth par le Pi."""
+    stopped = Signal()
+    page_requested = Signal(str)
+
+    def __init__(self, metrics=None):
+        super().__init__()
+        metrics = metrics or cfg.BMS_METRICS
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 12, 16, 12)
+        root.setSpacing(8)
+
+        self._bar = _PageBar("bms", self.page_requested.emit)
+        root.addLayout(self._bar)
+
+        main = QHBoxLayout()
+        main.setSpacing(8)
+        self._soc = Card(cfg.BMS_SOC.label, cfg.BMS_SOC.unit, "speedValue",
+                         center=True, unit_name="speedUnit")
+        main.addWidget(self._soc, 1)
+
+        colw = QWidget()
+        colw.setFixedWidth(350)
+        col = QVBoxLayout(colw)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(6)
+        self._metrics = []
+        for m in metrics:
+            c = RowCard(m.label, m.unit)
+            col.addWidget(c, 1)
+            self._metrics.append((m, c))
+        main.addWidget(colw)
+        root.addLayout(main, 1)
+
+        info = QFrame()
+        info.setObjectName("card")
+        lay = QHBoxLayout(info)
+        lay.setContentsMargins(12, 6, 12, 6)
+        self._state = QLabel("--")
+        set_status_style(self._state, None)
+        lay.addWidget(self._state)
+        lay.addStretch()
+        self._info = QLabel("--")
+        self._info.setObjectName("smallValue")
+        lay.addWidget(self._info)
+        root.addWidget(info)
+
+        root.addWidget(_stop_button(self.stopped.emit))
+
+    def update_data(self, d: dict):
+        self._bar.update_data(d)
+        self.update_bms(d)
+
+    def update_bms(self, d: dict):
+        """Partie BMS seule : appelee aussi quand le Teensy se tait."""
+        for m, card in [(cfg.BMS_SOC, self._soc)] + self._metrics:
+            try:
+                card.set_value(m.value(d))
+            except Exception:
+                card.set_value("--")
+        text, ok = cfg.bms_status(d)
+        self._state.setText(text)
+        set_status_style(self._state, ok)
+        self._info.setText(cfg.bms_info(d))
+
+
+class FoilsScreen(QWidget):
+    """Page Foils : pour chaque foil, hauteur lue par le sonar, validite
+    du sonar et commande du servo. Ligne du bas : etat du controle et
+    sorties des PID."""
+    stopped = Signal()
+    page_requested = Signal(str)
+
+    def __init__(self, channels=None):
+        super().__init__()
+        channels = channels or cfg.FOIL_CHANNELS
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 12, 16, 12)
+        root.setSpacing(8)
+
+        self._bar = _PageBar("foils", self.page_requested.emit)
+        root.addLayout(self._bar)
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self._cards = []
+        for ch in channels:
+            c = FoilCard(ch.label, cfg.SONAR_UNIT)
+            row.addWidget(c, 1)
+            self._cards.append((ch, c))
+        root.addLayout(row, 1)
+
+        info = QFrame()
+        info.setObjectName("card")
+        lay = QHBoxLayout(info)
+        lay.setContentsMargins(12, 6, 12, 6)
+        self._state = QLabel("--")
+        set_status_style(self._state, None)
+        lay.addWidget(self._state)
+        lay.addStretch()
+        self._info = QLabel("--")
+        self._info.setObjectName("smallValue")
+        lay.addWidget(self._info)
+        root.addWidget(info)
+
+        root.addWidget(_stop_button(self.stopped.emit))
+
+    def update_data(self, d: dict):
+        self._bar.update_data(d)
+        for ch, card in self._cards:
+            card.set_value(cfg.sonar_text(d, ch.key))
+            card.set_sonar(*cfg.sonar_status(d, ch.key))
+            card.set_servo(cfg.servo_text(d, ch.key), cfg.servo_pct(d, ch.key))
+        text, ok = cfg.foils_status(d)
+        self._state.setText(text)
+        set_status_style(self._state, ok)
+        self._info.setText(cfg.foils_info(d))
 
 
 class CalibScreen(QWidget):

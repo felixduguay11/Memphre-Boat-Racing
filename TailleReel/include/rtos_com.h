@@ -10,6 +10,7 @@
 //   Task_Watchdog ─────(egEtat : bits d'erreur)───► StateMachine, Propulsion
 //   Task_RPi ──────────(egEtat : EVT_CALIB_*)─────► Pilote (calibration levier)
 //   Task_RPi ──────────(egEtat : EVT_CRUISE_*)────► StateMachine (cruise control)
+//   Task_RPi ──────────(egEtat : EVT_BATT_BASSE)──► Propulsion (plafond batterie)
 //   Tâches ───────────(Shared Data, dataMutex)────► RPi, Watchdog, FSM
 //
 //  qCmd est une « mailbox » : longueur 1, écrite par xQueueOverwrite()
@@ -91,6 +92,8 @@ struct FsmCmd {
 #define EVT_CRUISE_VIT     (1UL << 20)  // {"cmd":"cruise_vitesse"}
 #define EVT_CRUISE_OFF     (1UL << 21)  // {"cmd":"cruise_off"} (ou {"cmd":"stop"})
 #define EVT_CRUISE_MASK    (EVT_CRUISE_ERPM | EVT_CRUISE_VIT | EVT_CRUISE_OFF)
+// Écrit par Task_RPi ({"cmd":"batt_basse"} / {"cmd":"batt_ok"}), lu par Task_Propulsion
+#define EVT_BATT_BASSE     (1UL << 22)  // → consigne plafonnée à ±CMD_MAX_BATT_*
 
 // ─── Objets FreeRTOS (définis dans main.cpp) ───
 extern SemaphoreHandle_t  dataMutex;

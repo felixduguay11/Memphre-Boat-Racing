@@ -6,10 +6,12 @@
 //  hot, esc[]) → l'UI (Real_V1_UI) et l'outil d'analyse marchent
 //  sans modification. Champs ajoutés (objets imbriqués, aplatis
 //  par json_graph_ui.py en « imu.roll », « wd.pil.ok », ...) :
-//    arme, cmode, cr{}, pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
+//    arme, cmode, bat_cap (1 = plafond batterie basse actif), cr{}, pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
 //  cr{} = cruise control : m (0 off, 1 ERPM, 2 vitesse), t (durée de
 //    l'activation, ms), fin (raison de sortie / refus), erpm et kmh
 //    (cibles de config.h, affichées dans le pop-up de l'UI).
+//  son{} / sio{} seulement si SONARS_ACTIFS, foils{} seulement si FOILS_ACTIFS
+//  (config.h). L'UI affiche « absent de la trame » sinon (page Foils).
 //  ⚠ "target" / "ramped" sont dans l'unité de MODE_COMMANDE
 //    (cmode : ERPM = eRPM, DUTY = ‰).
 //
@@ -154,7 +156,8 @@ static void sendTelemetry()
            k ? "," : "", e.id, e.vivant ? 1 : 0, (long)e.erpm, fin(e.duty),
            fin(e.i_mot), fin(e.i_in), fin(e.v_in), fin(e.t_fet), fin(e.t_mot));
     }
-    ap("],\"arme\":%d,\"cmode\":\"%s\"", s.arme ? 1 : 0, CMD_NOM);
+    ap("],\"arme\":%d,\"cmode\":\"%s\",\"bat_cap\":%d", s.arme ? 1 : 0, CMD_NOM,
+       (xEventGroupGetBits(egEtat) & EVT_BATT_BASSE) ? 1 : 0);
 
     // --- Cruise control ---
     ap(",\"cr\":{\"m\":%d,\"t\":%lu,\"fin\":%d,\"erpm\":%d,\"kmh\":%.1f}",
@@ -190,10 +193,13 @@ static void sendTelemetry()
        s.xs.pos_valid, fin(s.xs.lat), fin(s.xs.lon), s.xs.alt_valid, fin(s.xs.altitude),
        (unsigned long)s.xs.pos_rejets);
 
-#if FOILS_ACTIFS
-    // --- Sonars + foils ---
+#if SONARS_ACTIFS
+    // --- Sonars : distance (cm) et sortie TOR de validité ---
     ap(",\"son\":{\"av\":%.1f,\"ag\":%.1f,\"ad\":%.1f}", fin(s.dist[0]), fin(s.dist[1]), fin(s.dist[2]));
-    ap(",\"sio\":{\"av\":%d,\"ag\":%d,\"ad\":%d}", s.io[0], s.io[1], s.io[2]);
+    ap(",\"sio\":{\"av\":%d,\"ag\":%d,\"ad\":%d}", s.io[0] ? 1 : 0, s.io[1] ? 1 : 0, s.io[2] ? 1 : 0);
+#endif
+#if FOILS_ACTIFS
+    // --- Foils : commande des servos (°), sorties PID hauteur / pitch / roll ---
     ap(",\"foils\":{\"on\":%d,\"cmd\":{\"av\":%.1f,\"ag\":%.1f,\"ad\":%.1f},"
        "\"h\":{\"av\":%.2f,\"ag\":%.2f,\"ad\":%.2f},\"p\":%.2f,\"r\":%.2f}",
        (xEventGroupGetBits(egEtat) & EVT_CONTROLE) ? 1 : 0,    // actifs aussi en CRUISE
@@ -228,8 +234,15 @@ static void handlePiCommand(const char* line)
     const char* p = strstr(line, "\"cmd\"");
     if (!p) return;
 
+    // Batterie basse (BMS lu par le Pi) → plafond de consigne
+    if (strstr(p, "batt_basse")) {
+        xEventGroupSetBits(egEtat, EVT_BATT_BASSE);
+    }
+    else if (strstr(p, "batt_ok")) {
+        xEventGroupClearBits(egEtat, EVT_BATT_BASSE);
+    }
     // Paramètres des VESC : renvoyer les configs déjà lues
-    if (strstr(p, "escconf")) {
+    else if (strstr(p, "escconf")) {
         EscParams_DemanderRenvoi();
     }
     // Calibration du levier (testée AVANT start/stop) → Task_Pilote

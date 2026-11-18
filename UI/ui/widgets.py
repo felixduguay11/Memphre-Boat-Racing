@@ -2,7 +2,8 @@
 """widgets.py — briques reutilisables, sans logique metier."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy
+from PySide6.QtWidgets import (QFrame, QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy,
+                               QProgressBar)
 
 CENTER = Qt.AlignmentFlag.AlignCenter
 BOTTOM = Qt.AlignmentFlag.AlignBottom
@@ -62,7 +63,8 @@ class SpeedCard(QFrame):
     """Etiquette, grande valeur centree, unite centree en dessous
     (carte etroite : l'unite ne tient pas a cote du chiffre)."""
 
-    def __init__(self, label: str, unit: str, value_name: str = "speedMid"):
+    def __init__(self, label: str, unit: str, value_name: str = "speedMid",
+                 sub_label: str = ""):
         super().__init__()
         self.setObjectName("card")
         lay = QVBoxLayout(self)
@@ -78,8 +80,21 @@ class SpeedCard(QFrame):
         lay.addWidget(self._value)
         lay.addWidget(self._unit)
         lay.addStretch()
+        # Ligne optionnelle en bas de la carte (ex. consigne moteur)
+        self._sub = None
+        if sub_label:
+            sl = QLabel(sub_label); sl.setObjectName("speedSubLabel")
+            sl.setAlignment(CENTER)
+            self._sub = QLabel("--"); self._sub.setObjectName("speedSub")
+            self._sub.setAlignment(CENTER)
+            lay.addWidget(sl)
+            lay.addWidget(self._sub)
 
     def set_value(self, text): self._value.setText(text)
+
+    def set_sub(self, text):
+        if self._sub is not None:
+            self._sub.setText(text)
 
 
 class RowCard(QFrame):
@@ -164,3 +179,177 @@ class Badge(QLabel):
         self.setObjectName("pill" if ok else "pillKo")
         self.style().unpolish(self)
         self.style().polish(self)
+
+
+class MultiCard(QFrame):
+    """Une seule carte, plusieurs valeurs cote a cote (ex. V | A | W).
+    Chaque colonne : petite etiquette, puis valeur + unite."""
+
+    def __init__(self, metrics):
+        super().__init__()
+        self.setObjectName("card")
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 6, 14, 6)
+        lay.setSpacing(6)
+        self._values = []
+        for n, m in enumerate(metrics):
+            if n:
+                lay.addStretch(1)
+            col = QVBoxLayout()
+            col.setSpacing(0)
+            lab = QLabel(m.label);  lab.setObjectName("cardLabel")
+            val = QLabel("--");     val.setObjectName("multiValue")
+            unit = QLabel(m.unit);  unit.setObjectName("multiUnit")
+            row = QHBoxLayout()
+            row.setSpacing(4)
+            row.addWidget(val, 0, BOTTOM)
+            row.addWidget(unit, 0, BOTTOM)
+            col.addWidget(lab)
+            col.addLayout(row)
+            lay.addLayout(col)
+            self._values.append(val)
+
+    def set_values(self, texts):
+        for lab, t in zip(self._values, texts):
+            lab.setText(t)
+
+
+class ChargeCard(QFrame):
+    """Batterie : temperature en gros en haut a droite, barre de charge
+    avec le pourcentage a sa droite.
+    Barre verte au-dessus de `warn`, jaune + texte d'alerte rouge a `warn`
+    et moins, rouge + autre texte a `stop` et moins."""
+
+    def __init__(self, label: str, warn: int, stop: int,
+                 warn_text: str = "Attention", stop_text: str = "Vitesse limitee"):
+        super().__init__()
+        self.setObjectName("card")
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._warn, self._stop = warn, stop
+        self._warn_text, self._stop_text = warn_text, stop_text
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 6, 14, 10)
+        lay.setSpacing(4)
+
+        # En-tete : etiquette (remplacee par l'alerte rouge quand il y en
+        # a une), etat temperature a droite (comme les ESC)
+        head = QHBoxLayout()
+        head.setSpacing(6)
+        self._label_text = label
+        self._label = QLabel(label);  self._label.setObjectName("cardLabel")
+        self._temp = QLabel("--")
+        self._label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        head.addWidget(self._label, 1, Qt.AlignmentFlag.AlignVCenter)
+        head.addWidget(self._temp, 0, Qt.AlignmentFlag.AlignVCenter)
+        lay.addLayout(head)
+        lay.addStretch(1)
+
+        # Barre de charge + pourcentage a droite
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        self._bar = QProgressBar()
+        self._bar.setRange(0, 100)
+        self._bar.setTextVisible(False)
+        self._bar.setFixedHeight(26)
+        self._pct = QLabel("-- %")
+        self._pct.setObjectName("chargePct")
+        self._pct.setAlignment(RIGHT_V)
+        self._pct.setMinimumWidth(70)
+        row.addWidget(self._bar, 1)
+        row.addWidget(self._pct)
+        lay.addLayout(row)
+        self.set_level(None)
+
+    @staticmethod
+    def _restyle(w, name):
+        if w.objectName() != name:
+            w.setObjectName(name)
+            w.style().unpolish(w)
+            w.style().polish(w)
+
+    def set_temp(self, text: str, ok):
+        """Etat temperature, comme les ESC : ok = True (vert), False
+        (rouge) ou None (pas de donnee)."""
+        self._temp.setText(text)
+        set_status_style(self._temp, ok)
+
+    def set_level(self, pct, alert_override: str = None):
+        """pct = 0..100, ou None si pas de donnee BMS.
+        alert_override : texte rouge impose (ex. plafond non confirme)."""
+        alert = ""
+        if pct is None:
+            self._pct.setText("-- %")
+            self._bar.setValue(0)
+            name = "chargeNone"
+        else:
+            pct = max(0, min(100, int(round(pct))))
+            self._pct.setText("%d %%" % pct)
+            self._bar.setValue(pct)
+            if pct <= self._stop:
+                name, alert = "chargeLow", self._stop_text
+            elif pct <= self._warn:
+                name, alert = "chargeMid", self._warn_text
+            else:
+                name = "chargeOk"
+        alert = alert_override if alert_override is not None else alert
+        self._label.setText(alert or self._label_text)
+        self._restyle(self._label, "chargeAlert" if alert else "cardLabel")
+        self._restyle(self._bar, name)
+
+
+class FoilCard(QFrame):
+    """Un foil : hauteur lue par le sonar en gros, etat du sonar, puis la
+    commande du servo (texte + barre entre butee min et butee max)."""
+
+    def __init__(self, label: str, unit: str):
+        super().__init__()
+        self.setObjectName("card")
+        # Largeur fixee par la grille, jamais par le texte
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 6, 14, 10)
+        lay.setSpacing(4)
+
+        head = QHBoxLayout()
+        self._label = QLabel(label); self._label.setObjectName("cardLabel")
+        self._unit = QLabel(unit);   self._unit.setObjectName("cardLabel")
+        head.addWidget(self._label)
+        head.addStretch()
+        head.addWidget(self._unit)
+        lay.addLayout(head)
+
+        self._value = QLabel("--");  self._value.setObjectName("escValue")
+        self._value.setAlignment(CENTER)
+        lay.addWidget(self._value, 1)
+
+        self._sonar = QLabel("--")
+        self._sonar.setAlignment(CENTER)
+        set_status_style(self._sonar, None)
+        lay.addWidget(self._sonar, 0, CENTER)
+
+        self._servo = QLabel("Servo : --"); self._servo.setObjectName("servoText")
+        self._servo.setAlignment(CENTER)
+        lay.addWidget(self._servo)
+        self._bar = QProgressBar()
+        self._bar.setRange(0, 1000)
+        self._bar.setTextVisible(False)
+        self._bar.setFixedHeight(16)
+        lay.addWidget(self._bar)
+        self.set_servo("Servo : --", None)
+
+    def set_value(self, text): self._value.setText(text)
+
+    def set_sonar(self, text: str, ok):
+        self._sonar.setText(text)
+        set_status_style(self._sonar, ok)
+
+    def set_servo(self, text: str, pct):
+        """pct = 0..100 entre butee min et max, ou None (barre vide)."""
+        self._servo.setText(text)
+        self._bar.setValue(0 if pct is None else int(round(pct * 10)))
+        name = "servoNone" if pct is None else "servoBar"
+        if self._bar.objectName() != name:
+            self._bar.setObjectName(name)
+            self._bar.style().unpolish(self._bar)
+            self._bar.style().polish(self._bar)
