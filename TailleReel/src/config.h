@@ -383,7 +383,7 @@
 // corrompus). Après GPS_REJETS_RESYNC rejets consécutifs, la
 // nouvelle valeur est acceptée (vrai saut, ex. premier fix).
 #define XSENS_RX_BUFFER       1024    // octets ajoutés au buffer RX de Serial5
-#define GPS_VITESSE_MAX_KMH   80.0f   // au-delà : rejet
+#define GPS_VITESSE_MAX_KMH   60.0f   // au-delà : rejet
 #define GPS_ACCEL_MAX_KMH_S   25.0f   // variation max plausible (km/h par seconde)
 #define GPS_SAUT_MIN_KMH      2.0f    // tolérance fixe (bruit)
 #define GPS_POS_SAUT_MAX_M    50.0f   // saut de position max entre deux trames
@@ -424,19 +424,11 @@
 #define CRUISE_ACTIF            1      // 0 = boutons de l'UI sans effet
 
 // ── Cruise ERPM ──
-// Consigne eRPM fixe : c'est la boucle de vitesse du VESC qui tient
-// le régime (pas de deadband à régler).
-#define CRUISE_ERPM             4600   // eRPM (= 1150 tr/min moteur, 4 paires de pôles)
-// Rampe de la consigne, de celle du levier à l'entrée jusqu'à
-// CRUISE_ERPM. Par défaut = rampe du levier (CMD_RAMP_STEP toutes
-// les 20 ms = 4000 eRPM/s) ; plus petit = démarrage plus doux.
-#define CRUISE_RAMPE_ERPM_S     (CMD_RAMP_STEP * 1000.0f / PERIODE_PROP_MS)
+#define CRUISE_ERPM             4645
+#define CRUISE_RAMPE_PAS        30 
 
 // ── Cruise vitesse (GPS de l'Xsens) ──
-// La consigne (eRPM) part de celle du levier, puis monte ou descend
-// à une pente proportionnelle à l'écart de vitesse. Dans le deadband
-// elle ne bouge plus.
-#define CRUISE_VITESSE_KMH      15.0f  // km/h
+#define CRUISE_VITESSE_KMH      9.0f  // km/h
 #define CRUISE_VIT_DEADBAND_KMH 0.5f   // ± km/h autour de la cible
 #define CRUISE_VIT_GAIN         80.0f  // eRPM par seconde, par km/h d'écart
 #define CRUISE_VIT_PENTE_MAX    400.0f // eRPM/s : variation max de la consigne

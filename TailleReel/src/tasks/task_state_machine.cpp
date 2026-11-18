@@ -49,12 +49,13 @@ static uint32_t cruiseBoucleMs = 0;        // dernier passage du cruise
 
 static_assert(CRUISE_ERPM >= CMD_MIN_UTILE && CRUISE_ERPM <= CMD_MAX_FORWARD,
               "CRUISE_ERPM hors de la plage de consigne du levier");
-static_assert(CRUISE_RAMPE_ERPM_S > 0.0f, "CRUISE_RAMPE_ERPM_S doit etre positive");
+static_assert(CRUISE_RAMPE_PAS > 0, "CRUISE_RAMPE_PAS doit etre positif");
 
-// Cruise ERPM : la consigne rejoint CRUISE_ERPM avec une rampe
+// Cruise ERPM : la consigne rejoint CRUISE_ERPM de CRUISE_RAMPE_PAS
+// eRPM toutes les 20 ms (au prorata si un passage arrive en retard)
 static float CruiseRampe(float consigne, float dt_s)
 {
-    float pas = CRUISE_RAMPE_ERPM_S * dt_s;
+    float pas = (float)CRUISE_RAMPE_PAS * (dt_s / 0.020f);
     if (consigne < CRUISE_ERPM) consigne = fminf(consigne + pas, (float)CRUISE_ERPM);
     else                        consigne = fmaxf(consigne - pas, (float)CRUISE_ERPM);
     return consigne;

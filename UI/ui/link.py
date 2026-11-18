@@ -134,11 +134,12 @@ class SimLink(BaseLink):
     que le pilote fictif remette le levier au repos (SIM_REARME_S)."""
 
     # Reprise de config.h (Teensy) — a garder en accord
-    SIM_CRUISE_ERPM = 4600
-    SIM_CRUISE_KMH = 15.0
+    SIM_CRUISE_ERPM = 4645
+    SIM_CRUISE_KMH = 9.0
     SIM_RAMPE = 4000.0          # eRPM/s : rampe du levier (CMD_RAMP_STEP / 20 ms)
+    SIM_CRUISE_RAMPE_PAS = 30   # CRUISE_RAMPE_PAS : eRPM par 20 ms en cruise ERPM
     SIM_MIN_UTILE = 400         # CMD_MIN_UTILE
-    SIM_VIT_DEADBAND = 0.5
+    SIM_VIT_DEADBAND = 1.0
     SIM_VIT_GAIN = 80.0
     SIM_VIT_PENTE_MAX = 400.0
     SIM_VIT_ERPM_MAX = 8000
@@ -227,7 +228,7 @@ class SimLink(BaseLink):
             self._arme = True                   # levier remis au repos puis repousse
         # Machine d'etat : consigne
         if self._cr == 1:                       # ERPM : rampe vers la cible
-            pas = self.SIM_RAMPE * dt
+            pas = self.SIM_CRUISE_RAMPE_PAS * dt / 0.020
             c = self._cr_cons
             self._cr_cons = min(c + pas, self.SIM_CRUISE_ERPM) if c < self.SIM_CRUISE_ERPM \
                 else max(c - pas, self.SIM_CRUISE_ERPM)
