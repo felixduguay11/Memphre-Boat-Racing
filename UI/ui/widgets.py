@@ -11,8 +11,8 @@ RIGHT_V = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 
 
 def set_status_style(label: QLabel, ok):
-    """ok = True (vert), False (rouge) ou None (pas de donnee)."""
-    name = {True: "statusOk", False: "statusKo", None: "statusNone"}[ok]
+    """ok = True (vert), "warn" (orange), False (rouge) ou None (pas de donnee)."""
+    name = {True: "statusOk", "warn": "statusWarn", False: "statusKo", None: "statusNone"}[ok]
     if label.objectName() != name:          # re-polish seulement si ca change
         label.setObjectName(name)
         label.style().unpolish(label)

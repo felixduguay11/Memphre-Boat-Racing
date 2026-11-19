@@ -141,10 +141,11 @@ def esc_unit() -> str:
 
 
 # ------------------------------------------------------------ alarmes temperature
-# Le pilote ne lit pas de chiffres : chaque temperature affiche OK, ou
-# NOT OK (xx °C) des qu'elle atteint sa limite.
-# A ajuster selon VESC Tool : par defaut le VESC commence lui-meme a
-# limiter le courant vers 85 °C, l'alerte doit donc tomber avant.
+# Avec le firmware actuel, c'est le Teensy qui decide (config.h :
+# T_*_ATTENTION, T_*_MAX) et envoie le niveau de chaque capteur dans
+# esc[].tn = [FET, MOT] : voir temp_statut() / temp_alerte() plus bas.
+# Les seuils ci-dessous ne servent plus qu'avec un ancien firmware sans
+# "tn" : chaque temperature affiche OK, ou NOT OK (xx °C) a sa limite.
 T_FET_MAX = 75.0            # °C
 T_MOT_MAX = 75.0            # °C
 
@@ -176,6 +177,59 @@ def temp_text(label: str, t: float, ok: bool) -> str:
     if ok:
         return "%s : OK" % label
     return "%s : NOT OK %.0f°C" % (label, t)
+
+
+# Protection de temperature du Teensy : niveau par capteur (esc[].tn),
+# seuils / plafond / plafond applique dans "th" (task_rpi.cpp).
+TEMP_OK, TEMP_ATTENTION, TEMP_LIMITE, TEMP_CAPTEUR = 0, 1, 2, 3
+
+
+def temp_niveau(e: dict, n: int):
+    """Niveau du capteur n (0 FET, 1 MOT, ordre de ESC_TEMPS) envoye par
+    le Teensy, ou None (ancien firmware)."""
+    tn = e.get("tn")
+    return tn[n] if isinstance(tn, list) and len(tn) > n else None
+
+
+def temp_statut(label: str, t, niveau: int):
+    """(texte, etat) pour la carte ESC ; etat = True (vert), "warn"
+    (orange), False (rouge)."""
+    if niveau == TEMP_CAPTEUR:
+        return "%s : capteur ?" % label, "warn"
+    if niveau == TEMP_LIMITE:
+        return "%s : LIMITE %.0f°C" % (label, t), False
+    if niveau == TEMP_ATTENTION:
+        return "%s : %.0f°C" % (label, t), "warn"
+    return "%s : OK" % label, True
+
+
+def temp_alerte(d: dict):
+    """Bandeau d'avertissement sous la barre du haut (commune a toutes
+    les pages) : (texte, niveau) du pire capteur de tous les ESC, ou
+    None. Ordre : limite > attention > capteur invalide."""
+    rangs = {TEMP_LIMITE: 3, TEMP_ATTENTION: 2, TEMP_CAPTEUR: 1}
+    noms = {"FET": "VESC", "MOT": "MOTEUR"}
+    pire = None
+    for e in d.get("esc") or []:
+        for n, chk in enumerate(ESC_TEMPS):
+            niv = temp_niveau(e, n)
+            if niv not in rangs:
+                continue
+            if pire is None or rangs[niv] > rangs[pire[0]]:
+                pire = (niv, "%s %s" % (noms.get(chk.label, chk.label), e.get("id", "?")),
+                        e.get(chk.key))
+    if pire is None:
+        return None
+    niv, nom, t = pire
+    if niv == TEMP_CAPTEUR:
+        return "%s : capteur de temperature invalide" % nom, niv
+    tt = "%.0f °C" % t if isinstance(t, (int, float)) else "? °C"
+    if niv == TEMP_LIMITE:
+        th = d.get("th") or {}
+        if th.get("on"):
+            return "%s TROP CHAUD %s · vitesse limitee" % (nom, tt), niv
+        return "%s TROP CHAUD %s" % (nom, tt), niv
+    return "%s chaud %s" % (nom, tt), niv
 
 
 def esc_offline_sub(_e: dict) -> str:

@@ -309,15 +309,28 @@
 
 #define PROP_CMD_TIMEOUT_MS 200      // commande FSM plus vieille → consigne 0
 
-// Limite de température — mêmes valeurs que config.py côté Pi
-// (T_FET_MAX, T_MOT_MAX, TEMP_HYST). Surchauffe → consigne
-// plafonnée à ERPM_MAX_SURCHAUFFE, retour quand toutes les temp.
-// sont sous (limite - TEMP_HYST).
-#define LIMITE_TEMP_ACTIVE  0        // 0 = surveillance désactivée
-#define T_FET_MAX           9999.0f    // °C
-#define T_MOT_MAX           9999.0f    // °C
-#define TEMP_HYST           3.0f     // °C
-#define ERPM_MAX_SURCHAUFFE 18000     // plafond de consigne en surchauffe
+// Températures FET (VESC) et moteur, sur chaque ESC. Deux niveaux :
+//   ATTENTION → avertissement orange à l'écran, aucune limite
+//   MAX       → consigne des deux moteurs plafonnée à
+//               ERPM_MAX_SURCHAUFFE + avertissement rouge. Pas d'arrêt :
+//               le bateau doit pouvoir rentrer au quai.
+// Retour au niveau inférieur sous (seuil - TEMP_HYST).
+// Hors de [T_CAPTEUR_MIN, T_CAPTEUR_MAX] : capteur invalide (débranché,
+// ou pas configuré dans VESC Tool : -99) → avertissement, pas de limite.
+// L'UI reçoit ces seuils dans la trame : rien à recopier côté Pi.
+// Les VESC réduisent eux-mêmes le courant à partir de l_temp_*_start
+// (85 °C par défaut) : garder T_*_MAX en dessous.
+#define LIMITE_TEMP_ACTIVE  1        // 0 = avertissements seulement, jamais de plafond
+#define PLAFOND_RAMP_STEP   80       // eRPM par cycle (20 ms)
+#define DUTY_PLAFOND_RAMP_STEP 1     // ‰ par cycle (20 ms) : descente vers un plafond
+#define T_FET_ATTENTION     60.0f    // °C
+#define T_FET_MAX           75.0f    // °C
+#define T_MOT_ATTENTION     60.0f    // °C
+#define T_MOT_MAX           75.0f    // °C
+#define TEMP_HYST           10.0f    // °C
+#define T_CAPTEUR_MIN       -20.0f   // °C : en dessous, capteur invalide
+#define T_CAPTEUR_MAX       150.0f   // °C : au-dessus, capteur invalide
+#define ERPM_MAX_SURCHAUFFE 4000     // eRPM : plafond de consigne en surchauffe
 
 // Batterie basse — commande du Pi ({"cmd":"batt_basse"} / {"cmd":"batt_ok"}).
 // Le Pi lit le BMS en Bluetooth ; sous BMS_STOP_SOC (config.py, 20 %)
@@ -331,6 +344,7 @@
 #if MODE_COMMANDE == MODE_ERPM
   #define CMD_NOM            "ERPM"
   #define CMD_RAMP_STEP      RAMP_STEP
+  #define CMD_PLAFOND_RAMP_STEP PLAFOND_RAMP_STEP
   #define CMD_MIN_UTILE      ERPM_MIN_UTILE
   #define CMD_MAX_FORWARD    ERPM_MAX_FORWARD
   #define CMD_MAX_REVERSE    ERPM_MAX_REVERSE
@@ -338,6 +352,7 @@
 #elif MODE_COMMANDE == MODE_DUTY
   #define CMD_NOM            "DUTY"
   #define CMD_RAMP_STEP      DUTY_RAMP_STEP
+  #define CMD_PLAFOND_RAMP_STEP DUTY_PLAFOND_RAMP_STEP
   #define CMD_MIN_UTILE      DUTY_MIN_UTILE
   #define CMD_MAX_FORWARD    DUTY_MAX_FORWARD
   #define CMD_MAX_REVERSE    DUTY_MAX_REVERSE

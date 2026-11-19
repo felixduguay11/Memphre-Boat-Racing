@@ -59,37 +59,64 @@ class _FitLabel(QLabel):
             self.setText("")
 
 
-class _PageBar(QHBoxLayout):
+class _PageBar(QVBoxLayout):
     """Barre commune aux pages de telemetrie : onglets a gauche,
-    consigne et etat (mode · run) a droite."""
+    consigne et etat (mode · run) a droite. En dessous, un bandeau
+    pleine largeur n'apparait que pendant un avertissement de
+    temperature du Teensy : visible quelle que soit la page."""
 
     def __init__(self, active: str, on_page):
         super().__init__()
-        self.setSpacing(8)
+        self.setSpacing(6)
+        ligne = QHBoxLayout()
+        ligne.setSpacing(8)
         for key, text in PAGES:
             b = QPushButton(text)
             b.setObjectName("tabOn" if key == active else "tab")
             b.setFixedSize(112, 50)
             b.clicked.connect(lambda _=False, k=key: on_page(k))
-            self.addWidget(b)
+            ligne.addWidget(b)
         self.target = _FitLabel("--")
         self.target.setObjectName("barHint")
         # Si la place manque, c'est la consigne qui est rognee, jamais l'etat
         self.target.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.target.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.mode = Badge("--", True)
-        self.addWidget(self.target, 1)
-        self.addSpacing(10)
-        self.addWidget(self.mode)
+        ligne.addWidget(self.target, 1)
+        ligne.addSpacing(10)
+        ligne.addWidget(self.mode)
+        self.addLayout(ligne)
+
+        self.banniere = QLabel("")
+        self.banniere.setObjectName("barWarn")
+        self.banniere.setAlignment(CENTER)
+        self.banniere.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.banniere.hide()
+        self.addWidget(self.banniere)
 
     def update_data(self, d: dict):
         self.mode.set_state(cfg.mode_text(d), cfg.mode_ok(d))
+        self._update_alerte(d)
         # Calibration du levier en cours (ex. lancee par la commande
         # secrete F/R) : on affiche la mesure a la place de la consigne.
         if cfg.calib_en_cours(d):
             self._set_target("CALIB " + cfg.calib_texte_mesure(d))
         else:
             self._set_target(cfg.target_text(d))
+
+    def _update_alerte(self, d: dict):
+        alerte = cfg.temp_alerte(d)
+        if not alerte:
+            self.banniere.hide()
+            return
+        texte, niveau = alerte
+        name = "barAlert" if niveau == cfg.TEMP_LIMITE else "barWarn"
+        if self.banniere.objectName() != name:  # re-polish seulement si ca change
+            self.banniere.setObjectName(name)
+            self.banniere.style().unpolish(self.banniere)
+            self.banniere.style().polish(self.banniere)
+        self.banniere.setText(texte)
+        self.banniere.show()
 
     def _set_target(self, text: str):
         self.target.set_full(text)
@@ -435,7 +462,11 @@ class TelemetryScreen(QWidget):
             if t is None:
                 card.set_status(n, "%s : --" % chk.label, None)
                 continue
-            key = (esc_id, chk.key)
+            niveau = cfg.temp_niveau(e, n)
+            if niveau is not None:          # le Teensy decide (config.h)
+                card.set_status(n, *cfg.temp_statut(chk.label, t, niveau))
+                continue
+            key = (esc_id, chk.key)         # ancien firmware : seuils de cfg
             ok = cfg.temp_ok(t, chk.limit, self._temp_ok.get(key, True))
             self._temp_ok[key] = ok
             card.set_status(n, cfg.temp_text(chk.label, t, ok), ok)

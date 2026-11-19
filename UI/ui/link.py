@@ -151,6 +151,14 @@ class SimLink(BaseLink):
     SIM_ERPM_PAR_KMH = 380.0    # sessions 24 / 28
     SIM_TAU_S = 2.0             # retard de la vitesse sur le regime
     SIM_REARME_S = 2.0          # le pilote fictif remet le levier au repos
+    # Temperatures (config.h) : le moteur de l'ESC 11 chauffe et refroidit
+    # en ~2 min pour montrer les deux niveaux et le plafond
+    SIM_T_ATTENTION = 70.0      # T_FET_ATTENTION / T_MOT_ATTENTION
+    SIM_T_MAX = 80.0            # T_FET_MAX / T_MOT_MAX
+    SIM_TEMP_HYST = 3.0         # TEMP_HYST
+    SIM_ERPM_MAX_SURCHAUFFE = 3500
+    SIM_PLAFOND_RAMPE_PAS = 20  # PLAFOND_RAMP_STEP : eRPM par 20 ms
+    SIM_T_MOT = None            # pour les essais : impose t_mot de tous les ESC
 
     def __init__(self, esc_ids, period_ms: int = 50):
         super().__init__()
@@ -164,6 +172,7 @@ class SimLink(BaseLink):
         self._arme = True           # levier arme (False : consigne 0 jusqu'au repos)
         self._t_sortie = 0.0        # instant de la sortie du cruise
         self._target, self._ramped, self._v = 0, 0.0, 0.0
+        self._tn = {}               # (index ESC, capteur) -> niveau de temperature
         self._cap = False                 # plafond batterie basse (comme le Teensy)
         self._timer = QTimer(self)
         self._timer.setInterval(period_ms)
@@ -214,6 +223,24 @@ class SimLink(BaseLink):
             self._cr_t0, self._cr_t, self._cr_fin = time.monotonic(), 0, 0
             self._cr_cons = float(max(self._target, self.SIM_MIN_UTILE))
 
+    def _niveau_temp(self, t: float, prec: int) -> int:
+        """Comme NiveauTemp() du watchdog (task_watchdog.cpp)."""
+        if not (-20.0 <= t <= 150.0):
+            return 3
+        if t >= self.SIM_T_MAX:
+            return 2
+        n = 0 if prec == 3 else prec
+        if n == 2 and t < self.SIM_T_MAX - self.SIM_TEMP_HYST:
+            n = 1
+        if n == 1 and t < self.SIM_T_ATTENTION - self.SIM_TEMP_HYST:
+            n = 0
+        if n == 0 and t >= self.SIM_T_ATTENTION:
+            n = 1
+        return n
+
+    def _surchauffe(self) -> bool:
+        return any(v == 2 for v in self._tn.values())
+
     def _cruise_fin(self, raison: int):
         """Sortie : consigne 0 et levier a remettre au repos."""
         if self._cr:
@@ -245,16 +272,23 @@ class SimLink(BaseLink):
             self._cr_t = int((time.monotonic() - self._cr_t0) * 1000)
         else:
             self._target = int(levier) if self._arme else 0
-        # Task_Propulsion : plafond batterie basse (EVT_BATT_BASSE), puis rampe
+        # Task_Propulsion : plafonds (surchauffe, batterie basse), puis rampe ;
+        # au-dessus d'un plafond, descente douce
         t, r = self._target, self._ramped
+        plafond = self.SIM_ERPM_MAX_FORWARD
+        if self._surchauffe():
+            plafond = min(plafond, self.SIM_ERPM_MAX_SURCHAUFFE)
         if self._cap:
-            t = min(t, self.SIM_ERPM_MAX_FORWARD * self.SIM_BATT_BASSE_PCT // 100)
+            plafond = min(plafond, self.SIM_ERPM_MAX_FORWARD * self.SIM_BATT_BASSE_PCT // 100)
+        t = min(t, plafond)
         if t == 0:
             r = 0.0
         else:
             if r == 0:
                 r = float(self.SIM_MIN_UTILE)
             pas = self.SIM_RAMPE * dt
+            if r > t and r > plafond:
+                pas = self.SIM_PLAFOND_RAMPE_PAS * dt / 0.020
             r = min(r + pas, t) if r < t else max(r - pas, t)
         self._ramped = r
         # Bateau : la vitesse suit le regime
@@ -296,11 +330,21 @@ class SimLink(BaseLink):
         escs = []
         for k, i in enumerate(self._ids):
             f = 1.0 - 0.02 * k
+            t_fet = 42 + 8 * math.sin(n / 400.0 + k)
+            t_mot = 45 + 20 * math.sin(n / 400.0) + 18 * k        # ESC 11 : jusqu'a 83 °C
+            if self.SIM_T_MOT is not None:
+                t_mot = self.SIM_T_MOT
+            tn = []
+            for c, tc in enumerate((t_fet, t_mot)):
+                self._tn[(k, c)] = self._niveau_temp(tc, self._tn.get((k, c), 0))
+                tn.append(self._tn[(k, c)])
             escs.append({
                 "id": i, "ok": 1, "erpm": int(erpm * f), "duty": 0.42 * f,
                 "i_mot": iin / len(self._ids) + 1, "i_in": iin / len(self._ids),
-                "v_in": vin, "t_fet": 42 + n / 400.0, "t_mot": 38 + n / 500.0,
+                "v_in": vin, "t_fet": round(t_fet, 1), "t_mot": round(t_mot, 1), "tn": tn,
             })
+        th = {"a": [self.SIM_T_ATTENTION] * 2, "m": [self.SIM_T_MAX] * 2,
+              "cap": self.SIM_ERPM_MAX_SURCHAUFFE, "on": int(self._surchauffe())}
         # Xsens (format du firmware Integration taille reel)
         v = self._v + math.sin(n / 7.0) * 0.1                   # bruit du GPS
         imu = {"ok": 1, "frais": 1, "roll": math.sin(n / 18.0) * 6.0,
@@ -338,7 +382,8 @@ class SimLink(BaseLink):
                              "run": run, "arme": int(self._arme),
                              "son": son, "sio": sio, "foils": foils, "target": self._target,
                              "ramped": int(erpm), "esc": escs, "cmode": "ERPM",
-                             "bat_cap": int(self._cap), "cr": cr,
+                             "bat_cap": int(self._cap), "cr": cr, "th": th,
+                             "hot": int(self._surchauffe()),
                              "imu": imu, "gps": gps, "pil": pil})
 
 
