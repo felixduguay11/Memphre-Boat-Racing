@@ -19,8 +19,11 @@ static float rampedTarget = 0.0f;
 
 static inline int iclamp(int v, int lo, int hi) { return (v < lo) ? lo : (v > hi) ? hi : v; }
 
-// Real_V1 : StateMachine(target) — appelée toutes les 20 ms
-static void AppliquerConsigne(int target)
+// Real_V1 : StateMachine(target) — appelée toutes les 20 ms.
+// plafond_fwd / plafond_rev : plafonds actifs (surchauffe, batterie
+// basse), ou CMD_MAX_* s'il n'y en a pas. Au-dessus d'un plafond qui
+// vient de s'activer, la consigne redescend à CMD_PLAFOND_RAMP_STEP.
+static void AppliquerConsigne(int target, int plafond_fwd, int plafond_rev)
 {
     if (target == 0) {
         // Arret : coupure nette. ERPM : une consigne sous le Minimum ERPM
@@ -40,10 +43,13 @@ static void AppliquerConsigne(int target)
 
         // Rampe normale au-dessus du minimum (et descente progressive
         // avant une inversion de sens, pour menager les helices).
+        // Au-dessus d'un plafond : descente douce jusqu'au plafond.
         if (rampedTarget < target) {
-            rampedTarget = fminf(rampedTarget + CMD_RAMP_STEP, (float)target);
+            float pas = (rampedTarget < -plafond_rev) ? CMD_PLAFOND_RAMP_STEP : CMD_RAMP_STEP;
+            rampedTarget = fminf(rampedTarget + pas, (float)target);
         } else if (rampedTarget > target) {
-            rampedTarget = fmaxf(rampedTarget - CMD_RAMP_STEP, (float)target);
+            float pas = (rampedTarget > plafond_fwd) ? CMD_PLAFOND_RAMP_STEP : CMD_RAMP_STEP;
+            rampedTarget = fmaxf(rampedTarget - pas, (float)target);
         }
     }
 
@@ -76,18 +82,23 @@ void Task_Propulsion(void *ptr)
         // 2) Sécurités du watchdog
         EventBits_t bits = xEventGroupGetBits(egEtat);
         if (bits & EVT_ERR_CRITIQUE) target = 0;
+        int plafond_fwd = CMD_MAX_FORWARD;
+        int plafond_rev = CMD_MAX_REVERSE;
 #if LIMITE_TEMP_ACTIVE
         if (bits & EVT_SURCHAUFFE) {
-            target = iclamp(target, -CMD_MAX_SURCHAUFFE, CMD_MAX_SURCHAUFFE);
+            if (CMD_MAX_SURCHAUFFE < plafond_fwd) plafond_fwd = CMD_MAX_SURCHAUFFE;
+            if (CMD_MAX_SURCHAUFFE < plafond_rev) plafond_rev = CMD_MAX_SURCHAUFFE;
         }
 #endif
         // Batterie basse (demandé par le Pi d'après le BMS)
         if (bits & EVT_BATT_BASSE) {
-            target = iclamp(target, -CMD_MAX_BATT_REV, CMD_MAX_BATT_FWD);
+            if (CMD_MAX_BATT_FWD < plafond_fwd) plafond_fwd = CMD_MAX_BATT_FWD;
+            if (CMD_MAX_BATT_REV < plafond_rev) plafond_rev = CMD_MAX_BATT_REV;
         }
+        target = iclamp(target, -plafond_rev, plafond_fwd);
 
         // 3) Rampe + envoi aux VESC
-        AppliquerConsigne(target);
+        AppliquerConsigne(target, plafond_fwd, plafond_rev);
 
         float duree_us = (float)(micros() - t_debut);
 
@@ -106,5 +117,6 @@ void Task_Propulsion(void *ptr)
 
 static_assert(CMD_MAX_BATT_FWD <= CMD_MAX_FORWARD && CMD_MAX_BATT_REV <= CMD_MAX_REVERSE,
               "BATT_BASSE_PCT doit rester entre 0 et 100");
-static_assert(CMD_MAX_SURCHAUFFE >= CMD_MIN_UTILE,
-              "le plafond de surchauffe doit rester dans la plage utile");
+static_assert(CMD_MAX_SURCHAUFFE >= CMD_MIN_UTILE && CMD_MAX_SURCHAUFFE <= CMD_MAX_FORWARD,
+              "le plafond de surchauffe doit rester entre CMD_MIN_UTILE et CMD_MAX_FORWARD");
+static_assert(CMD_PLAFOND_RAMP_STEP > 0, "CMD_PLAFOND_RAMP_STEP doit etre positif");

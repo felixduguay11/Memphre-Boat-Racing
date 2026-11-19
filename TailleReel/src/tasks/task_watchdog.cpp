@@ -14,6 +14,7 @@ volatile uint32_t WD_heartbeat[NB_TACHES] = {};
 WdTache  WD_taches[NB_TACHES] = {};
 uint32_t WD_erreurs    = 0;
 bool     WD_surchauffe = false;
+uint8_t  WD_temp_niv[NB_VESC][NB_TEMP] = {};
 bool     WD_reset_wdt  = false;
 float    WD_temps_us   = 0.0f;
 
@@ -65,6 +66,28 @@ static inline void wdt_materiel_feed()
 }
 
 // =====================================================
+//  Niveau de température d'un capteur, avec hystérésis :
+//  on monte dès qu'un seuil est atteint, on redescend d'un
+//  niveau seulement sous (seuil - TEMP_HYST).
+// =====================================================
+static uint8_t NiveauTemp(float t, uint8_t prec, float seuil_att, float seuil_max)
+{
+    if (!(t >= T_CAPTEUR_MIN && t <= T_CAPTEUR_MAX)) return TEMP_CAPTEUR;   // aussi NaN
+    if (t >= seuil_max) return TEMP_LIMITE;
+    uint8_t n = (prec == TEMP_CAPTEUR) ? (uint8_t)TEMP_OK : prec;
+    if (n == TEMP_LIMITE    && t < seuil_max - TEMP_HYST) n = TEMP_ATTENTION;
+    if (n == TEMP_ATTENTION && t < seuil_att - TEMP_HYST) n = TEMP_OK;
+    if (n == TEMP_OK        && t >= seuil_att)            n = TEMP_ATTENTION;
+    return n;
+}
+
+static_assert(T_FET_ATTENTION < T_FET_MAX && T_MOT_ATTENTION < T_MOT_MAX,
+              "le seuil d'attention doit etre sous le seuil de limite");
+static_assert(T_CAPTEUR_MIN < T_FET_ATTENTION && T_CAPTEUR_MIN < T_MOT_ATTENTION &&
+              T_FET_MAX < T_CAPTEUR_MAX && T_MOT_MAX < T_CAPTEUR_MAX,
+              "les seuils de temperature doivent etre dans la plage valide du capteur");
+
+// =====================================================
 //  Task_Watchdog — 10 Hz
 // =====================================================
 void Task_Watchdog(void *ptr)
@@ -87,8 +110,8 @@ void Task_Watchdog(void *ptr)
         vu_ms[i]   = now;              // période de grâce au démarrage
     }
 
-    // Surchauffe par VESC, avec hystérésis (Real_V1 : MajSurchauffe)
-    bool chaud[NB_VESC] = {false, false};
+    // Niveaux de température par VESC (FET, moteur), avec hystérésis
+    uint8_t niv[NB_VESC][NB_TEMP] = {};
 
     uint32_t   crit_prec    = 0;
     uint32_t   cycle        = 0;
@@ -142,20 +165,19 @@ void Task_Watchdog(void *ptr)
             if (esc[k].deja_vu && !esc[k].vivant) erreurs |= ERR_VESC[k];
         }
 
-        // Surchauffe (Real_V1) : un VESC muet garde son dernier état,
-        // ses températures sont périmées.
+        // Températures : un VESC muet garde ses derniers niveaux (ses
+        // températures sont périmées ; son silence est déjà une erreur
+        // critique). Seul le niveau LIMITE plafonne la consigne.
+        bool surchauffe = false;
         for (int k = 0; k < NB_VESC; k++) {
-            if (!esc[k].vivant) continue;
-            float tf = esc[k].t_fet;
-            float tm = esc[k].t_mot;
-            if (tf >= T_FET_MAX || tm >= T_MOT_MAX) {
-                chaud[k] = true;
-            } else if (tf < T_FET_MAX - TEMP_HYST && tm < T_MOT_MAX - TEMP_HYST) {
-                chaud[k] = false;
+            if (esc[k].vivant) {
+                niv[k][TEMP_FET] = NiveauTemp(esc[k].t_fet, niv[k][TEMP_FET], T_FET_ATTENTION, T_FET_MAX);
+                niv[k][TEMP_MOT] = NiveauTemp(esc[k].t_mot, niv[k][TEMP_MOT], T_MOT_ATTENTION, T_MOT_MAX);
             }
-            // entre les deux : on garde l'état précédent (hystérésis)
+            for (int c = 0; c < NB_TEMP; c++) {
+                if (niv[k][c] == TEMP_LIMITE) surchauffe = true;
+            }
         }
-        bool surchauffe = chaud[0] || chaud[1];
 
         if ((now - xsens_t_ms) > XSENS_DONNEES_TIMEOUT_MS) erreurs |= ERR_XSENS_DONNEES;
 
@@ -188,6 +210,9 @@ void Task_Watchdog(void *ptr)
             }
             WD_erreurs    = erreurs;
             WD_surchauffe = surchauffe;
+            for (int k = 0; k < NB_VESC; k++) {
+                for (int c = 0; c < NB_TEMP; c++) WD_temp_niv[k][c] = niv[k][c];
+            }
             WD_reset_wdt  = reset_wdt;
             WD_temps_us   = duree_us;
             xSemaphoreGive(dataMutex);

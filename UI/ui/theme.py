@@ -58,6 +58,10 @@ QWidget        {{ background:{bg}; color:{text}; font-family:"{font}"; }}
 QLabel#title   {{ font-size:32px; font-weight:600; }}
 QLabel#hint    {{ font-size:20px; color:{muted}; }}
 QLabel#barHint {{ font-size:14px; color:{muted}; }}
+QLabel#barWarn  {{ font-size:20px; font-weight:700; color:#1a1a1a; background:{warn};
+                   border-radius:8px; padding:3px 10px; }}
+QLabel#barAlert {{ font-size:20px; font-weight:700; color:{ko_fg}; background:{ko_bg};
+                   border:2px solid {ko_fg}; border-radius:8px; padding:2px 10px; }}
 QLabel#pill    {{ font-size:22px; font-weight:600; padding:6px 14px; border-radius:16px;
                   background:{ok_bg}; color:{ok_fg}; }}
 QLabel#pillKo  {{ font-size:22px; font-weight:600; padding:6px 14px; border-radius:16px;
@@ -92,6 +96,8 @@ QLabel#rowValue   {{ font-size:50px; font-weight:600; }}
 QLabel#smallValue {{ font-size:24px; font-weight:500; }}
 QLabel#statusOk   {{ font-size:19px; color:{ok_fg}; padding:2px 10px; }}
 QLabel#statusNone {{ font-size:19px; color:{muted}; padding:2px 10px; }}
+QFrame#card QLabel#statusWarn {{ font-size:19px; font-weight:600; color:#1a1a1a;
+                     background:{warn}; border-radius:8px; padding:2px 10px; }}
 QFrame#card QLabel#statusKo {{ font-size:19px; font-weight:600; color:{ko_fg};
                      background:{ko_bg}; border-radius:8px; padding:2px 10px; }}
 QPushButton#primary {{ font-size:28px; border-radius:10px; border:2px solid {accent};

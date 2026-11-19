@@ -6,7 +6,10 @@
 //  hot, esc[]) → l'UI (Real_V1_UI) et l'outil d'analyse marchent
 //  sans modification. Champs ajoutés (objets imbriqués, aplatis
 //  par json_graph_ui.py en « imu.roll », « wd.pil.ok », ...) :
-//    arme, cmode, bat_cap (1 = plafond batterie basse actif), cr{}, pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
+//    arme, cmode, bat_cap (1 = plafond batterie basse actif), th{}, cr{}, pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
+//  esc[].tn = niveaux de température [FET, moteur] : 0 OK, 1 attention,
+//    2 limite, 3 capteur invalide. th{} = seuils de config.h (a = attention,
+//    m = limite, [FET, moteur]), cap = plafond, on = plafond appliqué.
 //  cr{} = cruise control : m (0 off, 1 ERPM, 2 vitesse), t (durée de
 //    l'activation, ms), fin (raison de sortie / refus), erpm et kmh
 //    (cibles de config.h, affichées dans le pop-up de l'UI).
@@ -97,6 +100,7 @@ struct Snapshot {
     float dist[NB_CANAUX];  bool io[NB_CANAUX];
     float cmd[NB_CANAUX];   float h[NB_CANAUX];  float p_out;  float r_out;
     WdTache wd[NB_TACHES];  uint32_t err;  bool hot;  bool rst;
+    uint8_t tn[NB_VESC][NB_TEMP];
     float us[NB_TACHES];
 };
 
@@ -121,6 +125,9 @@ static void lireSnapshot(Snapshot &s)
         s.r_out = R_output;
         for (int i = 0; i < NB_TACHES; i++) s.wd[i] = WD_taches[i];
         s.err = WD_erreurs;  s.hot = WD_surchauffe;  s.rst = WD_reset_wdt;
+        for (int k = 0; k < NB_VESC; k++) {
+            for (int c = 0; c < NB_TEMP; c++) s.tn[k][c] = WD_temp_niv[k][c];
+        }
 
         s.us[T_PILOTE] = Pilote_temps_us;
         s.us[T_FSM]    = SM_temps_us;
@@ -152,12 +159,18 @@ static void sendTelemetry()
         const EscData &e = s.esc[k];
         ap("%s{\"id\":%d,\"ok\":%d,\"erpm\":%ld,\"duty\":%.3f,"
            "\"i_mot\":%.2f,\"i_in\":%.2f,\"v_in\":%.2f,"
-           "\"t_fet\":%.1f,\"t_mot\":%.1f}",
+           "\"t_fet\":%.1f,\"t_mot\":%.1f,\"tn\":[%d,%d]}",
            k ? "," : "", e.id, e.vivant ? 1 : 0, (long)e.erpm, fin(e.duty),
-           fin(e.i_mot), fin(e.i_in), fin(e.v_in), fin(e.t_fet), fin(e.t_mot));
+           fin(e.i_mot), fin(e.i_in), fin(e.v_in), fin(e.t_fet), fin(e.t_mot),
+           s.tn[k][TEMP_FET], s.tn[k][TEMP_MOT]);
     }
     ap("],\"arme\":%d,\"cmode\":\"%s\",\"bat_cap\":%d", s.arme ? 1 : 0, CMD_NOM,
        (xEventGroupGetBits(egEtat) & EVT_BATT_BASSE) ? 1 : 0);
+
+    // --- Protection de température : seuils de config.h et plafond appliqué ---
+    ap(",\"th\":{\"a\":[%.0f,%.0f],\"m\":[%.0f,%.0f],\"cap\":%d,\"on\":%d}",
+       (double)T_FET_ATTENTION, (double)T_MOT_ATTENTION, (double)T_FET_MAX, (double)T_MOT_MAX,
+       (int)CMD_MAX_SURCHAUFFE, (xEventGroupGetBits(egEtat) & EVT_SURCHAUFFE) ? 1 : 0);
 
     // --- Cruise control ---
     ap(",\"cr\":{\"m\":%d,\"t\":%lu,\"fin\":%d,\"erpm\":%d,\"kmh\":%.1f}",
