@@ -370,6 +370,32 @@
 //------------------------------------//
 
 
+//------ BATTERIE SECONDAIRE 4S ------//
+// Batterie qui alimente le Teensy, l'Xsens et le Pi. Tension lue sur
+// la pin V_batt_secondaire par un diviseur 47,54 kΩ / 9,954 kΩ :
+//   V_batt = V_pin × V_BATT_SEC_RATIO × V_BATT_SEC_CAL
+// Lue par le watchdog (10 Hz), moyenne sur V_BATT_SEC_MOYENNE lectures.
+//   < V_BATT_SEC_ATTENTION → avertissement (bandeau orange), aucune
+//     action ; fin au-dessus de V_BATT_SEC_ATTENTION + V_BATT_SEC_HYST
+//   < V_BATT_SEC_ARRET pendant V_BATT_SEC_ARRET_MS → erreur critique
+//     ERR_BATT_SEC : état ARRET, consigne 0, foils coupés. Verrouillée
+//     jusqu'au redémarrage du Teensy (la LiPo remonte quand on retire
+//     la charge : sans ça, le bateau pourrait repartir tout seul).
+//   < V_BATT_SEC_INVALIDE → mesure impossible (fil du diviseur coupé,
+//     Teensy sur USB) : avertissement, pas d'arrêt.
+#define BATT_SEC_ACTIVE         1        // 0 = ni mesure ni protection
+#define V_BATT_SEC_RATIO        5.776f   // (47,54 + 9,954) / 9,954
+#define V_BATT_SEC_CAL          1.000f   // étalonnage : V multimètre / V affichée
+#define V_BATT_SEC_VREF         3.3f     // V : référence de l'ADC du Teensy
+#define V_BATT_SEC_ATTENTION    14.0f    // V
+#define V_BATT_SEC_HYST         0.2f     // V
+#define V_BATT_SEC_ARRET        13.2f    // V
+#define V_BATT_SEC_ARRET_MS     10000    // ms sous V_BATT_SEC_ARRET avant l'arrêt
+#define V_BATT_SEC_INVALIDE     8.0f     // V : en dessous, mesure impossible
+#define V_BATT_SEC_MOYENNE      10       // lectures moyennées (10 Hz : 1 s)
+//------------------------------------//
+
+
 //----------- QUALITÉ DU BUS CAN -----//
 // Statistiques publiées dans la télémétrie (clé "can") :
 // trames reçues / rejetées (mal formées, perdues) et erreurs bus.
@@ -513,7 +539,7 @@
 #define TX_Batt_72V                 22
 #define RX_Batt_72V                 23
 //#define PIN_24                      24
-#define POT_Mats_Arriere            25
+#define V_batt_secondaire           25
 #define POT_Volant                  26
 #define POT_Levier                  27
 //#define PIN_28                      28

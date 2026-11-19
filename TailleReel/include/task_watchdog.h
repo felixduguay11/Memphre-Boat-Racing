@@ -19,6 +19,12 @@
 //        attention → WD_temp_niv seulement (avertissement à l'écran)
 //        limite    → EVT_SURCHAUFFE → consigne plafonnée (si LIMITE_TEMP_ACTIVE)
 //        capteur invalide → WD_temp_niv seulement (jamais de plafond)
+//    - tension de la batterie secondaire 4S (pin V_batt_secondaire) :
+//        < V_BATT_SEC_ATTENTION → WD_batt_sec_niv (avertissement à l'écran)
+//        < V_BATT_SEC_ARRET pendant V_BATT_SEC_ARRET_MS
+//                          → ERR_BATT_SEC (critique, verrouillée jusqu'au
+//                            redémarrage) → ARRET, consigne 0
+//        mesure impossible → WD_batt_sec_niv seulement (jamais d'arrêt)
 //    - watchdog matériel (RTWDOG) nourri à chaque cycle : si cette
 //      tâche ne tourne plus, le Teensy redémarre.
 // =====================================================
@@ -47,9 +53,10 @@ enum TacheId : uint8_t {
 #define ERR_VESC_A          (1UL << 16)
 #define ERR_VESC_B          (1UL << 17)
 #define ERR_XSENS_DONNEES   (1UL << 18)
+#define ERR_BATT_SEC        (1UL << 19)   // batterie secondaire vide (verrouillée)
 
 #define ERR_CRITIQUE_MASK   (ERR_TACHE(T_PILOTE) | ERR_TACHE(T_FSM) | ERR_TACHE(T_PROP) | \
-                             ERR_TACHE(T_ESC) | ERR_VESC_A | ERR_VESC_B)
+                             ERR_TACHE(T_ESC) | ERR_VESC_A | ERR_VESC_B | ERR_BATT_SEC)
 #define ERR_CAPTEUR_MASK    (ERR_TACHE(T_XSENS) | ERR_TACHE(T_SONAR) | ERR_TACHE(T_FOILS) | \
                              ERR_XSENS_DONNEES)
 
@@ -63,6 +70,14 @@ enum TempNiveau : uint8_t {
 #define TEMP_FET  0        // index dans WD_temp_niv[k][]
 #define TEMP_MOT  1
 #define NB_TEMP   2
+
+// ─── Niveau de la batterie secondaire (WD_batt_sec_niv, télémétrie "b12") ───
+enum BattSecNiveau : uint8_t {
+    BATT_SEC_OK        = 0,
+    BATT_SEC_ATTENTION = 1,    // < V_BATT_SEC_ATTENTION (ou compte à rebours avant l'arrêt)
+    BATT_SEC_ARRET     = 2,    // arrêt verrouillé jusqu'au redémarrage
+    BATT_SEC_INVALIDE  = 3     // mesure impossible
+};
 
 // ─── État d'une tâche (publié pour le RPi) ───
 struct WdTache {
@@ -83,6 +98,9 @@ extern WdTache  WD_taches[NB_TACHES];
 extern uint32_t WD_erreurs;       // combinaison de ERR_*
 extern bool     WD_surchauffe;    // au moins un capteur au niveau TEMP_LIMITE
 extern uint8_t  WD_temp_niv[NB_VESC][NB_TEMP];   // TempNiveau, par VESC : FET, moteur
+extern float    WD_batt_sec_v;    // V : tension moyennée de la batterie secondaire
+extern uint8_t  WD_batt_sec_niv;  // BattSecNiveau
+extern uint32_t WD_batt_sec_reste_ms;  // compte à rebours avant l'arrêt (0 = aucun)
 extern bool     WD_reset_wdt;     // le dernier démarrage vient du watchdog matériel
 extern float    WD_temps_us;
 

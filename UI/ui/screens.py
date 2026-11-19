@@ -62,8 +62,8 @@ class _FitLabel(QLabel):
 class _PageBar(QVBoxLayout):
     """Barre commune aux pages de telemetrie : onglets a gauche,
     consigne et etat (mode · run) a droite. En dessous, un bandeau
-    pleine largeur n'apparait que pendant un avertissement de
-    temperature du Teensy : visible quelle que soit la page."""
+    pleine largeur n'apparait que pendant une alerte du Teensy
+    (batterie 12V, temperatures) : visible quelle que soit la page."""
 
     def __init__(self, active: str, on_page):
         super().__init__()
@@ -105,12 +105,12 @@ class _PageBar(QVBoxLayout):
             self._set_target(cfg.target_text(d))
 
     def _update_alerte(self, d: dict):
-        alerte = cfg.temp_alerte(d)
+        alerte = cfg.bandeau_alerte(d)
         if not alerte:
             self.banniere.hide()
             return
-        texte, niveau = alerte
-        name = "barAlert" if niveau == cfg.TEMP_LIMITE else "barWarn"
+        texte, rouge = alerte
+        name = "barAlert" if rouge else "barWarn"
         if self.banniere.objectName() != name:  # re-polish seulement si ca change
             self.banniere.setObjectName(name)
             self.banniere.style().unpolish(self.banniere)
@@ -586,6 +586,9 @@ class BmsScreen(QWidget):
         self._metrics = []
         for m in metrics:
             c = RowCard(m.label, m.unit)
+            # 6 lignes (avec la batterie 12V) : valeur plus petite pour
+            # tenir dans la hauteur de la ligne (50 px ailleurs)
+            c._value.setStyleSheet("font-size:34px;")
             col.addWidget(c, 1)
             self._metrics.append((m, c))
         main.addWidget(colw)
