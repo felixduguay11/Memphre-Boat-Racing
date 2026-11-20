@@ -159,6 +159,13 @@ class SimLink(BaseLink):
     SIM_ERPM_MAX_SURCHAUFFE = 3500
     SIM_PLAFOND_RAMPE_PAS = 20  # PLAFOND_RAMP_STEP : eRPM par 20 ms
     SIM_T_MOT = None            # pour les essais : impose t_mot de tous les ESC
+    # Batterie secondaire 4S (config.h : V_BATT_SEC_*)
+    SIM_V12 = 15.6              # V : tension simulee (modifiable pour les essais)
+    SIM_V12_ATTENTION = 14.0
+    SIM_V12_HYST = 0.2
+    SIM_V12_ARRET = 13.2
+    SIM_V12_ARRET_S = 10.0      # V_BATT_SEC_ARRET_MS
+    SIM_V12_INVALIDE = 8.0
 
     def __init__(self, esc_ids, period_ms: int = 50):
         super().__init__()
@@ -173,6 +180,7 @@ class SimLink(BaseLink):
         self._t_sortie = 0.0        # instant de la sortie du cruise
         self._target, self._ramped, self._v = 0, 0.0, 0.0
         self._tn = {}               # (index ESC, capteur) -> niveau de temperature
+        self._b12_att, self._b12_bas, self._b12_arret = False, None, False
         self._cap = False                 # plafond batterie basse (comme le Teensy)
         self._timer = QTimer(self)
         self._timer.setInterval(period_ms)
@@ -238,6 +246,29 @@ class SimLink(BaseLink):
             n = 1
         return n
 
+    def _batt12(self) -> dict:
+        """Comme BattSecMaj() du watchdog (sans la moyenne) : attention avec
+        hysteresis, compte a rebours sous le seuil d'arret, arret verrouille."""
+        v, now = self.SIM_V12, time.monotonic()
+        invalide = v < self.SIM_V12_INVALIDE
+        if invalide or v >= self.SIM_V12_ARRET:
+            self._b12_bas = None
+        elif self._b12_bas is None:
+            self._b12_bas = now
+        if self._b12_bas is not None and now - self._b12_bas >= self.SIM_V12_ARRET_S:
+            if not self._b12_arret:
+                self._b12_arret = True
+                self._cruise_fin(7)             # erreur critique
+        if v < self.SIM_V12_ATTENTION:
+            self._b12_att = True
+        elif v > self.SIM_V12_ATTENTION + self.SIM_V12_HYST:
+            self._b12_att = False
+        reste = 0
+        if self._b12_bas is not None and not self._b12_arret:
+            reste = math.ceil(self.SIM_V12_ARRET_S - (now - self._b12_bas))
+        n = 2 if self._b12_arret else 3 if invalide else 1 if (self._b12_bas is not None or self._b12_att) else 0
+        return {"v": round(v, 2), "n": n, "a": self.SIM_V12_ATTENTION, "s": self.SIM_V12_ARRET, "d": reste}
+
     def _surchauffe(self) -> bool:
         return any(v == 2 for v in self._tn.values())
 
@@ -272,6 +303,8 @@ class SimLink(BaseLink):
             self._cr_t = int((time.monotonic() - self._cr_t0) * 1000)
         else:
             self._target = int(levier) if self._arme else 0
+        if self._b12_arret:
+            self._target = 0                    # ARRET (erreur critique) : consigne 0
         # Task_Propulsion : plafonds (surchauffe, batterie basse), puis rampe ;
         # au-dessus d'un plafond, descente douce
         t, r = self._target, self._ramped
@@ -372,13 +405,17 @@ class SimLink(BaseLink):
         foils = {"on": int(ctl), "cmd": cmd, "h": h, "p": p_out, "r": r_out}
         cr = {"m": self._cr, "t": self._cr_t, "fin": self._cr_fin,
               "erpm": self.SIM_CRUISE_ERPM, "kmh": self.SIM_CRUISE_KMH}
-        if self._cr:
+        b12 = self._batt12()
+        if self._b12_arret:
+            run = "NEUTRAL"                     # ARRET : batterie 12V vide
+        elif self._cr:
             run = "CRUISE"                      # foils actifs aussi en CRUISE (EVT_CONTROLE)
         elif not self._arme:
             run = "NEUTRAL"                     # apres une sortie du cruise
         else:
             run = "CONTROLE" if ctl else "FORWARD"
-        self.telemetry.emit({"t": n * self._timer.interval(), "mode": "RUN",
+        self.telemetry.emit({"t": n * self._timer.interval(),
+                             "mode": "ARRET" if self._b12_arret else "RUN", "b12": b12,
                              "run": run, "arme": int(self._arme),
                              "son": son, "sio": sio, "foils": foils, "target": self._target,
                              "ramped": int(erpm), "esc": escs, "cmode": "ERPM",

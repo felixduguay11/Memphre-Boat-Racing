@@ -16,6 +16,9 @@ uint32_t WD_erreurs    = 0;
 bool     WD_surchauffe = false;
 uint8_t  WD_temp_niv[NB_VESC][NB_TEMP] = {};
 bool     WD_reset_wdt  = false;
+float    WD_batt_sec_v = 0.0f;
+uint8_t  WD_batt_sec_niv = BATT_SEC_OK;
+uint32_t WD_batt_sec_reste_ms = 0;
 float    WD_temps_us   = 0.0f;
 
 // ─── Délai max sans battement, par tâche (0 = non surveillée) ───
@@ -81,6 +84,57 @@ static uint8_t NiveauTemp(float t, uint8_t prec, float seuil_att, float seuil_ma
     return n;
 }
 
+// =====================================================
+//  Batterie secondaire 4S : moyenne glissante, niveaux,
+//  compte à rebours et arrêt verrouillé.
+// =====================================================
+#if BATT_SEC_ACTIVE
+static_assert(V_BATT_SEC_INVALIDE < V_BATT_SEC_ARRET && V_BATT_SEC_ARRET < V_BATT_SEC_ATTENTION,
+              "il faut V_BATT_SEC_INVALIDE < V_BATT_SEC_ARRET < V_BATT_SEC_ATTENTION");
+static_assert(V_BATT_SEC_MOYENNE >= 1, "V_BATT_SEC_MOYENNE doit etre >= 1");
+
+struct BattSec {
+    float    buf[V_BATT_SEC_MOYENNE] = {};
+    int      n = 0, i = 0;          // lectures dans buf, prochaine case
+    float    v = 0.0f;              // moyenne
+    bool     attention = false;     // hystérésis du seuil d'attention
+    bool     bas = false;           // sous V_BATT_SEC_ARRET, compte à rebours en cours
+    uint32_t bas_depuis = 0;
+    bool     arret = false;         // verrouillé jusqu'au redémarrage
+    uint32_t reste_ms = 0;
+    uint8_t  niv = BATT_SEC_OK;
+};
+
+// Une lecture (tension déjà convertie) : met à jour la moyenne et le niveau
+static void BattSecMaj(BattSec& b, float v_lue, uint32_t now)
+{
+    b.buf[b.i] = v_lue;
+    b.i = (b.i + 1) % V_BATT_SEC_MOYENNE;
+    if (b.n < V_BATT_SEC_MOYENNE) b.n++;
+    float somme = 0.0f;
+    for (int k = 0; k < b.n; k++) somme += b.buf[k];
+    b.v = somme / (float)b.n;
+
+    bool invalide = (b.v < V_BATT_SEC_INVALIDE);
+    if (invalide) {
+        b.bas = false;                       // une mesure impossible n'arrête jamais
+    } else if (b.v < V_BATT_SEC_ARRET) {
+        if (!b.bas) { b.bas = true; b.bas_depuis = now; }
+        if ((now - b.bas_depuis) >= (uint32_t)V_BATT_SEC_ARRET_MS) b.arret = true;
+    } else {
+        b.bas = false;
+    }
+    if (b.v < V_BATT_SEC_ATTENTION)                         b.attention = true;
+    else if (b.v > V_BATT_SEC_ATTENTION + V_BATT_SEC_HYST)  b.attention = false;
+
+    b.reste_ms = (b.bas && !b.arret) ? (uint32_t)V_BATT_SEC_ARRET_MS - (now - b.bas_depuis) : 0;
+    if      (b.arret)                 b.niv = BATT_SEC_ARRET;
+    else if (invalide)                b.niv = BATT_SEC_INVALIDE;
+    else if (b.bas || b.attention)    b.niv = BATT_SEC_ATTENTION;
+    else                              b.niv = BATT_SEC_OK;
+}
+#endif
+
 static_assert(T_FET_ATTENTION < T_FET_MAX && T_MOT_ATTENTION < T_MOT_MAX,
               "le seuil d'attention doit etre sous le seuil de limite");
 static_assert(T_CAPTEUR_MIN < T_FET_ATTENTION && T_CAPTEUR_MIN < T_MOT_ATTENTION &&
@@ -112,6 +166,9 @@ void Task_Watchdog(void *ptr)
 
     // Niveaux de température par VESC (FET, moteur), avec hystérésis
     uint8_t niv[NB_VESC][NB_TEMP] = {};
+#if BATT_SEC_ACTIVE
+    BattSec batt;
+#endif
 
     uint32_t   crit_prec    = 0;
     uint32_t   cycle        = 0;
@@ -181,6 +238,17 @@ void Task_Watchdog(void *ptr)
 
         if ((now - xsens_t_ms) > XSENS_DONNEES_TIMEOUT_MS) erreurs |= ERR_XSENS_DONNEES;
 
+#if BATT_SEC_ACTIVE
+        // Batterie secondaire (ADC partagé : adc_lire prend le mutex)
+        {
+            int   raw = adc_lire(V_batt_secondaire);
+            float v   = (float)raw / (float)((1 << ADC_RESOLUTION) - 1)
+                        * V_BATT_SEC_VREF * V_BATT_SEC_RATIO * V_BATT_SEC_CAL;
+            BattSecMaj(batt, v, now);
+            if (batt.arret) erreurs |= ERR_BATT_SEC;
+        }
+#endif
+
         // 4) Bits d'erreur pour la machine d'état et la propulsion
         uint32_t crit = erreurs & ERR_CRITIQUE_MASK;
         EventBits_t actifs = 0;
@@ -214,6 +282,11 @@ void Task_Watchdog(void *ptr)
                 for (int c = 0; c < NB_TEMP; c++) WD_temp_niv[k][c] = niv[k][c];
             }
             WD_reset_wdt  = reset_wdt;
+#if BATT_SEC_ACTIVE
+            WD_batt_sec_v        = batt.v;
+            WD_batt_sec_niv      = batt.niv;
+            WD_batt_sec_reste_ms = batt.reste_ms;
+#endif
             WD_temps_us   = duree_us;
             xSemaphoreGive(dataMutex);
         }

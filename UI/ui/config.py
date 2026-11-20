@@ -232,6 +232,57 @@ def temp_alerte(d: dict):
     return "%s chaud %s" % (nom, tt), niv
 
 
+# ------------------------------------------------------------ batterie secondaire 4S
+# Mesuree par le Teensy (pin 25, diviseur) : "b12": {"v": tension,
+# "n": niveau, "a": seuil d'attention, "s": seuil d'arret, "d": secondes
+# avant l'arret}. Seuils et delai dans config.h (V_BATT_SEC_*).
+B12_OK, B12_ATTENTION, B12_ARRET, B12_INVALIDE = 0, 1, 2, 3
+
+
+def batt12_text(d: dict) -> str:
+    """Tension de la batterie 12V pour la page BMS ("--" si absente ou invalide)."""
+    b = d.get("b12") or {}
+    if "v" not in b or b.get("n") == B12_INVALIDE:
+        return "--"
+    return "%.1f" % b["v"]
+
+
+def batt12_alerte(d: dict):
+    """(gravite, texte, rouge) pour le bandeau, ou None."""
+    b = d.get("b12") or {}
+    n = b.get("n", B12_OK)
+    v = b.get("v", 0.0)
+    if n == B12_ARRET:
+        return 6, "BATTERIE 12V VIDE %.1f V · ARRET, redemarrer le Teensy" % v, True
+    if n == B12_ATTENTION and b.get("d", 0) > 0:
+        return 5, "BATTERIE 12V %.1f V · ARRET DANS %d s" % (v, b["d"]), True
+    if n == B12_ATTENTION:
+        return 3, "Batterie 12V faible %.1f V" % v, False
+    if n == B12_INVALIDE:
+        return 1, "Batterie 12V : mesure invalide", False
+    return None
+
+
+def bandeau_alerte(d: dict):
+    """Bandeau sous la barre du haut : (texte, rouge) de l'alerte la plus
+    grave entre la batterie 12V et les temperatures, ou None.
+    Gravite : 12V vide > arret 12V imminent > temperature limite >
+    12V faible > temperature attention > mesure ou capteur invalide."""
+    alertes = []
+    b = batt12_alerte(d)
+    if b:
+        alertes.append(b)
+    t = temp_alerte(d)
+    if t:
+        texte, niv = t
+        gravite = {TEMP_LIMITE: 4, TEMP_ATTENTION: 2}.get(niv, 1)
+        alertes.append((gravite, texte, niv == TEMP_LIMITE))
+    if not alertes:
+        return None
+    _, texte, rouge = max(alertes, key=lambda a: a[0])
+    return texte, rouge
+
+
 def esc_offline_sub(_e: dict) -> str:
     return "aucune trame CAN"
 
@@ -721,6 +772,7 @@ BMS_METRICS: List[Metric] = [
     Metric("Cell min",  bms_cell_min, "V"),
     Metric("Cell max",  bms_cell_max, "V"),
     Metric("Temp max",  bms_temp_max, "°C"),
+    Metric("Batterie 12V", batt12_text, "V"),      # mesuree par le Teensy (pas le BMS)
 ]
 
 

@@ -6,7 +6,10 @@
 //  hot, esc[]) → l'UI (Real_V1_UI) et l'outil d'analyse marchent
 //  sans modification. Champs ajoutés (objets imbriqués, aplatis
 //  par json_graph_ui.py en « imu.roll », « wd.pil.ok », ...) :
-//    arme, cmode, bat_cap (1 = plafond batterie basse actif), th{}, cr{}, pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
+//    arme, cmode, bat_cap (1 = plafond batterie basse actif), th{}, b12{}, cr{}, pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
+//  b12{} = batterie secondaire 4S : v (V), n (0 OK, 1 attention, 2 arrêt
+//    verrouillé, 3 mesure invalide), a / s (seuils attention / arrêt),
+//    d (secondes avant l'arrêt, 0 = aucun compte à rebours).
 //  esc[].tn = niveaux de température [FET, moteur] : 0 OK, 1 attention,
 //    2 limite, 3 capteur invalide. th{} = seuils de config.h (a = attention,
 //    m = limite, [FET, moteur]), cap = plafond, on = plafond appliqué.
@@ -101,6 +104,7 @@ struct Snapshot {
     float cmd[NB_CANAUX];   float h[NB_CANAUX];  float p_out;  float r_out;
     WdTache wd[NB_TACHES];  uint32_t err;  bool hot;  bool rst;
     uint8_t tn[NB_VESC][NB_TEMP];
+    float b12_v;  uint8_t b12_n;  uint32_t b12_reste;
     float us[NB_TACHES];
 };
 
@@ -125,6 +129,7 @@ static void lireSnapshot(Snapshot &s)
         s.r_out = R_output;
         for (int i = 0; i < NB_TACHES; i++) s.wd[i] = WD_taches[i];
         s.err = WD_erreurs;  s.hot = WD_surchauffe;  s.rst = WD_reset_wdt;
+        s.b12_v = WD_batt_sec_v;  s.b12_n = WD_batt_sec_niv;  s.b12_reste = WD_batt_sec_reste_ms;
         for (int k = 0; k < NB_VESC; k++) {
             for (int c = 0; c < NB_TEMP; c++) s.tn[k][c] = WD_temp_niv[k][c];
         }
@@ -166,6 +171,13 @@ static void sendTelemetry()
     }
     ap("],\"arme\":%d,\"cmode\":\"%s\",\"bat_cap\":%d", s.arme ? 1 : 0, CMD_NOM,
        (xEventGroupGetBits(egEtat) & EVT_BATT_BASSE) ? 1 : 0);
+
+#if BATT_SEC_ACTIVE
+    // --- Batterie secondaire 4S : tension, niveau, seuils, compte à rebours (s) ---
+    ap(",\"b12\":{\"v\":%.2f,\"n\":%d,\"a\":%.1f,\"s\":%.1f,\"d\":%lu}",
+       fin(s.b12_v), s.b12_n, (double)V_BATT_SEC_ATTENTION, (double)V_BATT_SEC_ARRET,
+       (unsigned long)((s.b12_reste + 999) / 1000));
+#endif
 
     // --- Protection de température : seuils de config.h et plafond appliqué ---
     ap(",\"th\":{\"a\":[%.0f,%.0f],\"m\":[%.0f,%.0f],\"cap\":%d,\"on\":%d}",
