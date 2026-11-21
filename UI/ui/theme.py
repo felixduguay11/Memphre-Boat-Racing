@@ -79,6 +79,7 @@ QLabel#speedMid   {{ font-size:80px; font-weight:600; }}
 QLabel#speedSubLabel {{ font-size:18px; color:{muted}; }}
 QLabel#speedSub   {{ font-size:26px; font-weight:600; }}
 QLabel#multiValue {{ font-size:34px; font-weight:600; }}
+QLabel#multiValueAlert {{ font-size:34px; font-weight:700; color:{alert}; }}
 QLabel#multiUnit  {{ font-size:18px; color:{muted}; }}
 QLabel#chargeValue {{ font-size:40px; font-weight:600; }}
 QLabel#chargePct   {{ font-size:30px; font-weight:600; }}

@@ -2,13 +2,13 @@
 """
 config.py — tout ce qui se regle sans toucher au code de l'UI.
 
-Ajouter une metrique = ajouter une ligne dans TOP_METRICS (carte V | A | W).
+Ajouter une metrique = ajouter une ligne dans TOP_METRICS (carte du haut de la page Moteurs).
 Ajouter un ESC = ajouter son id dans ESC_IDS.
 """
 
 import os
 from dataclasses import dataclass
-from typing import Callable, List
+from typing import Callable, List, Optional
 
 # ------------------------------------------------------------ liaison
 # MODE REEL : le Teensy est branche en USB sur le Pi -> /dev/ttyACM0.
@@ -107,18 +107,31 @@ def power_w(d: dict) -> float:
     return battery_v(d) * current_in(d)
 
 
+def courant_moteur(d: dict) -> float:
+    """Courant moteur (couple) le plus grand des ESC qui repondent, en A."""
+    vals = [abs(e.get("i_mot", 0.0)) for e in _escs(d) if e.get("ok", 1)]
+    return max(vals) if vals else 0.0
+
+
+# Courant moteur affiche en rouge a partir de cette valeur : la limite
+# Motor Current Max des VESC est 300 A (saturation = le moteur ne peut
+# pas donner plus de couple).
+I_MOT_SATURE_A = 290
+
+
 # ------------------------------------------------------------ cartes du haut
 @dataclass(frozen=True)
 class Metric:
     label: str
     value: Callable[[dict], str]
     unit: str = ""
+    alerte: Optional[Callable[[dict], bool]] = None   # True -> valeur en rouge
 
 
 TOP_METRICS: List[Metric] = [
-    Metric("Batterie",  lambda d: "%.1f" % battery_v(d),      "V"),
-    Metric("Courant",   lambda d: "%.1f" % current_in(d),     "A"),
-    Metric("Puissance", lambda d: "%d"   % round(power_w(d)), "W"),
+    Metric("Courant moteur", lambda d: "%d" % round(courant_moteur(d)), "A",
+           alerte=lambda d: courant_moteur(d) >= I_MOT_SATURE_A),
+    Metric("Puissance",      lambda d: "%d" % round(power_w(d)),        "W"),
 ]
 
 TOP_COLUMNS = 3              # ancien affichage (une carte par valeur)

@@ -16,7 +16,7 @@ Produit, dans <session>_graphs/ (à côté du log, ou --out) :
                         --show pour afficher toutes les pages)
     1_conduite.png      levier, consigne vs régime réel, vitesse GPS
     2_puissance.png     courant moteur, courant batterie, tension, puissance
-    3_thermique.png     température FET / moteur, échauffement (I²)
+    3_thermique.png     température FET / moteur, température batterie (BMS), échauffement (I²)
     4_correlations.png  vitesse vs régime, puissance vs vitesse, courant vs régime, duty vs régime
     5_sante.png         bus CAN, watchdog, attitude Xsens
     6_moteur.png        régime, courant, puissance mécanique, rendement de chaque moteur
@@ -71,6 +71,7 @@ C_ENCRE2 = "#52514e"
 C_GRILLE = "#e4e3df"
 C_RUN = "#efeeea"                   # fond des périodes RUN
 C_ALERTE = "#e34948"                # réservé aux événements (ARRET, erreurs)
+C_SONDES = (C_ESC10, C_ESC11, C_TROIS, "#8a5cc7")   # sondes de température batterie 1 à 4
 
 
 # ------------------------------------------------------------ lecture
@@ -96,6 +97,52 @@ def lire(path: str):
     if not rows:
         sys.exit("aucune trame de télémétrie dans " + path)
     return rows
+
+
+# BMS (ANT, 1 Hz, lignes "type": "bms" du log). Températures "temp" : les
+# "temp_sensors" premières sont les sondes de la batterie, puis le MOSFET du BMS,
+# puis l'équilibreur (ordre d'aiobmsble).
+NB_SONDES_MAX = 4
+BMS_TROU_S = 3.0         # plus de 3 s sans trame BMS → pas de valeur (trou dans la courbe)
+
+
+def lire_bms(path: str):
+    """[(t_pi, {"bat1".."batN", "mos", "bal"})] des trames BMS du log."""
+    out = []
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if '"bms"' not in line:
+                continue
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if d.get("type") != "bms" or "t_pi" not in d:
+                continue
+            b = d.get("bms") or {}
+            temp = b.get("temp") or {}
+            vals = [temp[k] for k in sorted(temp, key=lambda k: int(k))]
+            n = int(b.get("temp_sensors", max(len(vals) - 2, 0)))
+            rec = {"bat%d" % (i + 1): v for i, v in enumerate(vals[:n])}
+            if len(vals) > n:
+                rec["mos"] = vals[n]
+            if len(vals) > n + 1:
+                rec["bal"] = vals[n + 1]
+            out.append((float(d["t_pi"]), rec))
+    return out
+
+
+def sur_temps(t, tb, v):
+    """Valeurs à 1 Hz (tb, v) recopiées sur l'axe de la télémétrie t (dernière valeur
+    connue), NaN avant la 1re trame ou après un trou de plus de BMS_TROU_S."""
+    out = np.full(len(t), np.nan)
+    if not len(tb):
+        return out
+    i = np.searchsorted(tb, t, side="right") - 1
+    ok = (i >= 0)
+    ok[ok] &= (t[ok] - tb[i[ok]]) <= BMS_TROU_S
+    out[ok] = v[i[ok]]
+    return out
 
 
 def col(rows, fn, nan=np.nan):
@@ -234,6 +281,14 @@ def charger(path, debut=None, fin=None):
     D["wd_err"] = col(rows, lambda r: r["wd"]["err"])
     D["prej"] = col(rows, lambda r: r["gps"]["prej"])
     D["vrej"] = col(rows, lambda r: r["imu"]["vrej"])
+    # Températures BMS (1 Hz) recopiées sur l'axe de la télémétrie (20 Hz)
+    bms = lire_bms(path)
+    tb = np.array([x[0] for x in bms])
+    for cle in ["bat%d" % (i + 1) for i in range(NB_SONDES_MAX)] + ["mos", "bal"]:
+        v = np.array([x[1].get(cle, np.nan) for x in bms], float)
+        D["t" + cle] = sur_temps(t, tb, v)
+    with np.errstate(all="ignore"):
+        D["tbat_max"] = np.nanmax([D["tbat%d" % (i + 1)] for i in range(NB_SONDES_MAX)], axis=0)
     return D
 
 
@@ -515,12 +570,29 @@ def p_puissance(plt, D, nom):
 
 def p_thermique(plt, D, nom):
     n_mot = np.isfinite(D["tmot10"]).any() or np.isfinite(D["tmot11"]).any()
-    fig, ax = page(plt, 3 if n_mot else 2, "Thermique — " + nom, D)
+    n_bat = np.isfinite(D["tbat_max"]).any() or np.isfinite(D["tmos"]).any()
+    fig, ax = page(plt, 2 + n_mot + n_bat, "Thermique — " + nom, D)
     deux_esc(ax[0], D, "tfet", "Température des MOSFET (ESC)", "°C")
     i = 1
     if n_mot:
         deux_esc(ax[1], D, "tmot", "Température moteur", "°C")
         i = 2
+    if n_bat:
+        a = ax[i]
+        for k in range(NB_SONDES_MAX):
+            v = D["tbat%d" % (k + 1)]
+            if np.isfinite(v).any():
+                a.plot(D["t"], v, color=C_SONDES[k], label="sonde %d" % (k + 1))
+        if np.isfinite(D["tmos"]).any():
+            a.plot(D["t"], D["tmos"], color=C_ENCRE2, lw=1.0, ls=(0, (4, 2)), label="MOSFET du BMS")
+        if np.isfinite(D["tbal"]).any():
+            a.plot(D["t"], D["tbal"], color=C_ENCRE2, lw=0.9, ls=(0, (1, 2)), label="équilibreur")
+        a.set_title("Température batterie (BMS, 1 mesure/s) : sondes de la batterie, "
+                    "MOSFET et équilibreur du BMS en pointillé")
+        a.set_ylabel("°C")
+        echelle_fine(a)
+        legende(a)
+        i += 1
     w = 20 * 10                                         # 10 s à 20 Hz
     ax[i].plot(D["t"], roulant(D["imot10"] ** 2, w) / 1000, color=C_ESC10, label="ESC 10")
     ax[i].plot(D["t"], roulant(D["imot11"] ** 2, w) / 1000, color=C_ESC11, label="ESC 11")
@@ -673,6 +745,15 @@ def resume(D, path):
         p("Tension batterie en RUN : %.1f V max, %.1f V min (chute sous charge %.1f V)" % (
             np.nanmax(vr), np.nanmin(vr), np.nanmax(vr) - np.nanmin(vr)))
     p("Puissance batterie max : %.1f kW" % (np.nanmax(D["pbat"]) / 1000))
+    if np.isfinite(D["tbat_max"]).any():
+        sondes = [(np.nanmax(D["tbat%d" % (k + 1)]), k + 1) for k in range(NB_SONDES_MAX)
+                  if np.isfinite(D["tbat%d" % (k + 1)]).any()]
+        tmax, kmax = max(sondes)
+        ligne = "Batterie (BMS) : %.1f °C au début, %.1f °C max (sonde %d)" % (
+            D["tbat_max"][np.isfinite(D["tbat_max"])][0], tmax, kmax)
+        if np.isfinite(D["tmos"]).any():
+            ligne += " | MOSFET du BMS max %.1f °C" % np.nanmax(D["tmos"])
+        p(ligne)
     wh = np.nansum(D["pbat"] * dt) / 3600
     p("Énergie consommée (ESC) : %.0f Wh" % wh)
     for n in ("10", "11"):

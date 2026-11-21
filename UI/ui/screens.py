@@ -267,7 +267,7 @@ class FlashScreen(QWidget):
 
 
 class TelemetryScreen(QWidget):
-    """Page Moteurs : batterie / courant / puissance, une carte par ESC,
+    """Page Moteurs : courant moteur / puissance, une carte par ESC,
     et en bas Stop, le timer du cruise et la case Cruise control.
     Cartes generees depuis cfg."""
     stopped = Signal()
@@ -286,7 +286,7 @@ class TelemetryScreen(QWidget):
         self._bar = _PageBar("moteurs", self.page_requested.emit)
         root.addLayout(self._bar)
 
-        # Rangee du haut : V | A | W dans une carte (moitie gauche),
+        # Rangee du haut : courant moteur | puissance dans une carte (moitie gauche),
         # charge batterie du BMS (moitie droite).
         top = QHBoxLayout()
         top.setSpacing(8)
@@ -407,13 +407,15 @@ class TelemetryScreen(QWidget):
         self._speed.set_sub(cfg.target_short(d))
         self._update_cruise(d)
 
-        texts = []
+        texts, alertes = [], []
         for m in self._metrics:
             try:
                 texts.append(m.value(d))
+                alertes.append(bool(m.alerte and m.alerte(d)))
             except Exception:
                 texts.append("--")
-        self._power.set_values(texts)
+                alertes.append(False)
+        self._power.set_values(texts, alertes)
         self.update_bms(d)
 
         seen = set()
