@@ -9,6 +9,7 @@
 #include "task_sonar.h"
 #include "task_esc_data.h"
 #include "task_watchdog.h"
+#include "servos.h"
 
 // ─── Définition des variables partagées ───
 ControlMode SM_mode     = ControlMode::IDLE;
@@ -97,6 +98,7 @@ static bool ControleAutorise(bool deja_en_controle, const PiloteData &p,
     if (!sonars_ok)                 return false;   // I/O des sonars
     if (!v_ok)                      return false;   // vitesse GPS valide
     if (bits & EVT_ERR_CAPTEUR)     return false;   // Xsens/Sonar/Foils en défaut
+    if (!Servos_TousValides())      return false;   // servos pas calibrés (UI → Calibration)
     float seuil = deja_en_controle ? (SM_VITESSE_CONTROLE_KMH - SM_VITESSE_HYST_KMH)
                                    :  SM_VITESSE_CONTROLE_KMH;
     return v_kmh >= seuil;

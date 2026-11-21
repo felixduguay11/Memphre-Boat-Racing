@@ -3,7 +3,7 @@
 // FreeRTOS   : tsandmann/freertos-teensy
 // Capteur    : IFM UGT207 (4-20mA) + résistance 150Ω
 // IMU/GPS    : Xsens MTi-670 sur Serial5 (pins 21/20)
-// Servo      : PWMServo (pins 2/3/4)
+// Servo      : PWM en µs, servos.cpp (pins 2/3/4)
 // VESC       : CAN3 (pins 30/31), IDs 10 et 11
 // RPi        : USB (Serial = /dev/ttyACM0 côté Pi), JSON
 //
@@ -23,6 +23,7 @@
 #include "task_propulsion.h"
 #include "task_esc_data.h"
 #include "task_watchdog.h"
+#include "servos.h"
 
 SemaphoreHandle_t  dataMutex;
 SemaphoreHandle_t  adcMutex;
@@ -49,6 +50,8 @@ void setup()
   egEtat    = xEventGroupCreate();
 
   ESC_InitCAN();                      // CAN3 250 kbps (Real_V1)
+
+  Servos_Init();                      // PWM des servos (sans impulsion) + calibration EEPROM
 
   xTaskCreate(Task_Watchdog,      "WD",     STACK_WD,     NULL, PRIO_WD,     &WD_handles[T_WD]);
   xTaskCreate(Task_StateMachine,  "FSM",    STACK_FSM,    NULL, PRIO_FSM,    &WD_handles[T_FSM]);

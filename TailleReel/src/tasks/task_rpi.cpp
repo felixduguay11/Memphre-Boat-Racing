@@ -6,7 +6,12 @@
 //  hot, esc[]) → l'UI (Real_V1_UI) et l'outil d'analyse marchent
 //  sans modification. Champs ajoutés (objets imbriqués, aplatis
 //  par json_graph_ui.py en « imu.roll », « wd.pil.ok », ...) :
-//    arme, cmode, bat_cap (1 = plafond batterie basse actif), th{}, b12{}, cr{}, pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
+//    arme, cmode, bat_cap (1 = plafond batterie basse actif), th{}, b12{}, cr{}, pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, sv{}, wd{}
+//  sv{} = servos (toujours envoyé) : c (servo en calibration, -1 aucun),
+//    us (sa position, µs), r (dernier résultat, ServoCalRes), k (dernière
+//    valeur enregistrée : 0 min, 1 neutre, 2 max), cal = [[min, neutre,
+//    max, valide] × 3] en µs (0 = pas enregistré), ordre avant, arr.
+//    gauche, arr. droit. foils.cmd est en µs (0 = servo pas commandé).
 //  b12{} = batterie secondaire 4S : v (V), n (0 OK, 1 attention, 2 arrêt
 //    verrouillé, 3 mesure invalide), a / s (seuils attention / arrêt),
 //    d (secondes avant l'arrêt, 0 = aucun compte à rebours).
@@ -34,6 +39,7 @@
 #include "task_esc_data.h"
 #include "task_watchdog.h"
 #include "esc_params.h"
+#include "servos.h"
 
 // Mutex défini dans main.cpp
 extern SemaphoreHandle_t dataMutex;
@@ -223,9 +229,21 @@ static void sendTelemetry()
     ap(",\"son\":{\"av\":%.1f,\"ag\":%.1f,\"ad\":%.1f}", fin(s.dist[0]), fin(s.dist[1]), fin(s.dist[2]));
     ap(",\"sio\":{\"av\":%d,\"ag\":%d,\"ad\":%d}", s.io[0] ? 1 : 0, s.io[1] ? 1 : 0, s.io[2] ? 1 : 0);
 #endif
+    // --- Servos : calibration (UI) et Min / Neutre / Max en service ---
+    {
+        ServoEtat sv = {};
+        ServoCalib_Etat(sv);
+        ap(",\"sv\":{\"c\":%d,\"us\":%u,\"r\":%u,\"k\":%u,\"cal\":[",
+           sv.actif, (unsigned)sv.us, (unsigned)sv.res, (unsigned)sv.derniere);
+        for (int i = 0; i < NB_CANAUX; i++)
+            ap("%s[%u,%u,%u,%d]", i ? "," : "", (unsigned)sv.cal[i][SV_MIN],
+               (unsigned)sv.cal[i][SV_NEUTRE], (unsigned)sv.cal[i][SV_MAX], sv.valide[i] ? 1 : 0);
+        ap("]}");
+    }
+
 #if FOILS_ACTIFS
-    // --- Foils : commande des servos (°), sorties PID hauteur / pitch / roll ---
-    ap(",\"foils\":{\"on\":%d,\"cmd\":{\"av\":%.1f,\"ag\":%.1f,\"ad\":%.1f},"
+    // --- Foils : commande des servos (µs), sorties PID hauteur / pitch / roll ---
+    ap(",\"foils\":{\"on\":%d,\"cmd\":{\"av\":%.0f,\"ag\":%.0f,\"ad\":%.0f},"
        "\"h\":{\"av\":%.2f,\"ag\":%.2f,\"ad\":%.2f},\"p\":%.2f,\"r\":%.2f}",
        (xEventGroupGetBits(egEtat) & EVT_CONTROLE) ? 1 : 0,    // actifs aussi en CRUISE
        fin(s.cmd[0]), fin(s.cmd[1]), fin(s.cmd[2]),
@@ -253,12 +271,28 @@ static void sendHeartbeat()
     Serial.write((const uint8_t*)json, jlen);
 }
 
+// Switch ON (pilote) : les servos ne se calibrent que switch ON coupé
+static bool switchOn()
+{
+    bool on = true;                          // en cas de doute : refuser
+    if (xSemaphoreTake(dataMutex, portMAX_DELAY)) {
+        on = Pilote_data.switch_on;
+        xSemaphoreGive(dataMutex);
+    }
+    return on;
+}
+
 // Parsing volontairement minimal : on cherche la valeur de "cmd" (Real_V1).
 static void handlePiCommand(const char* line)
 {
     const char* p = strstr(line, "\"cmd\"");
     if (!p) return;
 
+    // Calibration des servos (testée AVANT "calib" : "servo_calib" le contient)
+    if (strstr(p, "servo_")) {
+        ServoCalib_Commande(line, switchOn());
+        return;
+    }
     // Batterie basse (BMS lu par le Pi) → plafond de consigne
     if (strstr(p, "batt_basse")) {
         xEventGroupSetBits(egEtat, EVT_BATT_BASSE);
@@ -337,6 +371,7 @@ void Task_RPi(void *ptr)
 
     // Commandes du Pi — non bloquant
     readPiCommands();
+    ServoCalib_Tick(switchOn());             // calibration des servos : fin si ON / UI muette
 
     // Sortie vers le Pi
     if (streaming) {

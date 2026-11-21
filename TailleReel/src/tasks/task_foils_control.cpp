@@ -6,17 +6,13 @@
 
 extern SemaphoreHandle_t dataMutex;
 
-static PWMServo servo_avant;
-static PWMServo servo_arriere_gauche;
-static PWMServo servo_arriere_droit;
-
 // Définitions des variables partagées
 float H_outputs[NB_CANAUX]      = {0.0f, 0.0f, 0.0f};
 float P_output                  =  0.0f;
 float R_output                  =  0.0f;
 float HPR_cmd_servos[NB_CANAUX] = {0.0f, 0.0f, 0.0f};
 float HPR_control_time_us       =  0.0f;
-float cmd_filt[NB_CANAUX]       = {SERVO_AVANT_NEUTRAL, SERVO_ARRIERE_GAUCHE_NEUTRAL, SERVO_ARRIERE_DROIT_NEUTRAL};
+float cmd_filt[NB_CANAUX]       = {SERVO_US_CENTRE, SERVO_US_CENTRE, SERVO_US_CENTRE};   // µs
 float H_prev_dist[NB_CANAUX]    = {0.0f, 0.0f, 0.0f};
 float H_integral[NB_CANAUX]     = {0.0f, 0.0f, 0.0f};
 float H_deriv[NB_CANAUX]        = {0.0f, 0.0f, 0.0f};
@@ -114,13 +110,12 @@ void Task_foils_Control(void *ptr)
     TickType_t lastWakeTime = xTaskGetTickCount();
     TickType_t prevTick     = lastWakeTime;
 
-    servo_avant.attach(PWM_Servo_Avant);
-    servo_arriere_gauche.attach(PWM_Servo_Arriere_Gauche);
-    servo_arriere_droit.attach(PWM_Servo_Arriere_Droit);
-
-    servo_avant.write(SERVO_AVANT_NEUTRAL);
-    servo_arriere_gauche.write(SERVO_ARRIERE_GAUCHE_NEUTRAL);
-    servo_arriere_droit.write(SERVO_ARRIERE_DROIT_NEUTRAL);
+    // Servos : PWM initialisé par Servos_Init() (main.cpp). Le filtre part
+    // du neutre calibré ; la 1re commande (ci-dessous) est le neutre.
+    for (int i = 0; i < NB_CANAUX; i++) {
+        float mn, neu, mx;
+        if (Servo_Bornes(i, mn, neu, mx)) cmd_filt[i] = neu;
+    }
 
     while (1)
     {
@@ -133,8 +128,12 @@ void Task_foils_Control(void *ptr)
         float hauteur_out[NB_CANAUX];
         float pitch_out;
         float roll_out;
-        float servo_raw[NB_CANAUX];
-        float cmd[NB_CANAUX];
+        float servo_raw[NB_CANAUX];     // µs
+        float cmd[NB_CANAUX];           // µs
+        float s_min[NB_CANAUX], s_neu[NB_CANAUX], s_max[NB_CANAUX];
+        bool  s_ok[NB_CANAUX];
+        for (int i = 0; i < NB_CANAUX; i++)
+            s_ok[i] = Servo_Bornes(i, s_min[i], s_neu[i], s_max[i]);
 
         TickType_t now = xTaskGetTickCount();
         float dt = (now - prevTick) * portTICK_PERIOD_MS / 1000.0f;
@@ -167,9 +166,10 @@ void Task_foils_Control(void *ptr)
             roll_out = 0.0f;
         }
 
-        servo_raw[0] = (float)SERVO_NEUTRAL[0] + hauteur_out[0] + pitch_out;              // avant
-        servo_raw[1] = (float)SERVO_NEUTRAL[1] + hauteur_out[1] - pitch_out - roll_out;   // arr. gauche
-        servo_raw[2] = (float)SERVO_NEUTRAL[2] + hauteur_out[2] - pitch_out + roll_out;   // arr. droit
+        // Sorties des PID en degrés servo → µs autour du neutre calibré
+        servo_raw[0] = s_neu[0] + (hauteur_out[0] + pitch_out)            * SERVO_US_PAR_DEG;   // avant
+        servo_raw[1] = s_neu[1] + (hauteur_out[1] - pitch_out - roll_out) * SERVO_US_PAR_DEG;   // arr. gauche
+        servo_raw[2] = s_neu[2] + (hauteur_out[2] - pitch_out + roll_out) * SERVO_US_PAR_DEG;   // arr. droit
 
         // AJOUT : PID appliqué uniquement en CONTROLE (machine d'état).
         // Sinon : neutre + intégrateurs à zéro (pas de windup, réentrée
@@ -177,7 +177,7 @@ void Task_foils_Control(void *ptr)
         bool foils_actifs = (xEventGroupGetBits(egEtat) & EVT_CONTROLE) != 0;
         if (!foils_actifs) {
             for (int i = 0; i < NB_CANAUX; i++) {
-                servo_raw[i]   = (float)SERVO_NEUTRAL[i];
+                servo_raw[i]   = s_neu[i];
                 H_integral[i]  = 0.0f;
                 H_prev_dist[i] = dist[i];
             }
@@ -187,15 +187,19 @@ void Task_foils_Control(void *ptr)
             R_prev_roll  = roll_deg;
         }
         
+        // Pendant une calibration (UI), Task_RPi commande les servos : on n'écrit rien.
+        bool calib = ServoCalib_Active();
         for (int i = 0; i < NB_CANAUX; i++) {
+            if (!s_ok[i]) {                 // pas de calibration valide : servo libre
+                cmd[i] = 0.0f;
+                if (!calib) Servo_Couper(i);
+                continue;
+            }
             cmd_filt[i] = SERVO_ALPHA * servo_raw[i] + (1.0f - SERVO_ALPHA) * cmd_filt[i];
-            cmd_filt[i] = fclamp(cmd_filt[i], (float)SERVO_MIN[i], (float)SERVO_MAX[i]);
+            cmd_filt[i] = fclamp(cmd_filt[i], s_min[i], s_max[i]);
             cmd[i]      = cmd_filt[i];
+            if (!calib) Servo_Ecrire(i, cmd[i]);
         }
-
-        servo_avant.write((int)cmd[0]);
-        servo_arriere_gauche.write((int)cmd[1]);
-        servo_arriere_droit.write((int)cmd[2]);
 
         float duree_us = (float)(micros() - t_debut);
 

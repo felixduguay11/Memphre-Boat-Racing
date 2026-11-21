@@ -87,19 +87,23 @@
 
 
 //-------------- SERVOS --------------//
-#define SERVO_ALPHA                    0.2f
-// SERVO AVANT
-#define SERVO_AVANT_NEUTRAL            148
-#define SERVO_AVANT_MIN                120 
-#define SERVO_AVANT_MAX                163
-// SERVO ARRIERE GAUCHE
-#define SERVO_ARRIERE_GAUCHE_NEUTRAL   148
-#define SERVO_ARRIERE_GAUCHE_MIN       120 
-#define SERVO_ARRIERE_GAUCHE_MAX       163
-// SERVO ARRIERE DROIT
-#define SERVO_ARRIERE_DROIT_NEUTRAL    148
-#define SERVO_ARRIERE_DROIT_MIN        120 
-#define SERVO_ARRIERE_DROIT_MAX        163
+// Hitec MDB1200WP, réglage d'usine (pas reprogrammés) :
+//   impulsion 900 à 2100 µs, centre 1500 µs, ±60°
+//   → 10 µs = 1° au palonnier ; le servo ignore un écart < 2 µs.
+// Commande en µs (module servos.cpp). Min / Neutre / Max de chaque
+// servo : calibrés depuis l'UI (Calibration → servo), sauvés en EEPROM.
+// Servo sans calibration valide (Min < Neutre < Max) : pas commandé
+// (sauf pendant sa calibration) et état CONTROLE refusé.
+#define SERVO_ALPHA              0.2f
+#define SERVO_PWM_HZ             50
+#define SERVO_PWM_BITS           15       // 0,6 µs par pas à 50 Hz
+#define SERVO_US_ABS_MIN         900      // limites de la fiche, jamais dépassées
+#define SERVO_US_ABS_MAX         2100
+#define SERVO_US_CENTRE          1500     // départ de la calibration si pas de neutre valide
+#define SERVO_US_PAR_DEG         10.0f    // sorties des PID (degrés servo) → µs
+#define SERVO_CALIB_EEPROM_ADDR  64       // levier à l'adresse 0
+#define SERVO_CALIB_PAS_MAX      50       // µs : plus grand pas accepté par commande
+#define SERVO_CALIB_VIE_MS       1000     // sans signe de vie de l'UI → fin de la calibration
 //------------------------------------//
 
 
@@ -474,9 +478,6 @@
 #define CRUISE_VIT_GAIN         80.0f  // eRPM par seconde, par km/h d'écart
 #define CRUISE_VIT_PENTE_MAX    400.0f // eRPM/s : variation max de la consigne
 #define CRUISE_VIT_ERPM_MAX     8000   // plafond de la consigne (2000 tr/min)
-// Moteurs au plafond de courant du VESC : ils ne suivent plus la
-// consigne. Si (consigne - régime réel) dépasse cet écart, la
-// consigne ne monte plus (sinon elle s'emballe jusqu'au plafond).
 #define CRUISE_VIT_ECART_MAX    1200   // eRPM
 
 // L'UI envoie {"cmd":"cruise_vie"} en continu. Plus rien depuis ce
@@ -528,9 +529,9 @@
 //#define PIN_11                      11
 //#define PIN_12                      12
 #define LED                         13   // SORTIE : clignote pendant la calibration du levier
-#define Analog_Sonar_Avant          14
-#define Analog_Sonar_Arriere_Gauche 15
-#define Analog_Sonar_Arriere_Droit  16
+#define Analog_Sonar_Avant          15
+#define Analog_Sonar_Arriere_Gauche 16
+#define Analog_Sonar_Arriere_Droit  14
 //#define PIN_17                      17
 //#define PIN_18                      18
 #define Relay_Control               19   // ENTRÉE : switch d'activation du contrôle des foils
