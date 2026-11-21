@@ -105,6 +105,10 @@ QPushButton#primary {{ font-size:28px; border-radius:10px; border:2px solid {acc
                        background:{accent_bg}; color:{accent_fg}; min-height:66px; }}
 QPushButton#danger  {{ font-size:26px; border-radius:10px; border:2px solid {danger};
                        background:{danger_bg}; color:{danger_fg}; min-height:54px; }}
+QPushButton#servoPas {{ font-size:30px; font-weight:600; border-radius:10px; border:2px solid {accent};
+                        background:{accent_bg}; color:{accent_fg}; min-height:64px; }}
+QPushButton#servoEnr {{ font-size:20px; border-radius:10px; border:2px solid {accent};
+                        background:transparent; color:{text}; min-height:64px; }}
 QPushButton#ghost {{ font-size:20px; border-radius:10px; border:1px solid {line};
                      background:transparent; color:{muted}; }}
 QPushButton#tab   {{ font-size:22px; border-radius:10px; border:1px solid {line};
@@ -120,8 +124,8 @@ QLabel#cruiseTimer   {{ font-size:30px; font-weight:600; color:{muted}; }}
 QLabel#cruiseTimerOn {{ font-size:30px; font-weight:600; color:{ok_fg}; }}
 QLabel#cruiseInfo    {{ font-size:15px; color:{muted}; }}
 QLabel#cruiseInfoRearme {{ font-size:15px; font-weight:600; color:{ko_fg}; }}
-QFrame#cruisePopup   {{ background:{card}; border:3px solid {accent}; border-radius:14px; }}
-QFrame#cruisePopup QLabel {{ background:transparent; }}
+QFrame#cruisePopup, QFrame#calibPopup {{ background:{card}; border:3px solid {accent}; border-radius:14px; }}
+QFrame#cruisePopup QLabel, QFrame#calibPopup QLabel {{ background:transparent; }}
 QLabel#cruisePopupTitle {{ font-size:26px; font-weight:600; color:{accent_fg}; }}
 QPushButton#cruiseChoix {{ font-size:28px; font-weight:600; border-radius:12px; border:2px solid {accent};
                         background:{accent_bg}; color:{accent_fg}; }}

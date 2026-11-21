@@ -156,7 +156,7 @@ class StartScreen(QWidget):
         flash.setFixedSize(220, 52)
         flash.clicked.connect(self.flash_requested.emit)
         bar.addWidget(flash)
-        calib = QPushButton("Calibrer levier")
+        calib = QPushButton("Calibration")
         calib.setObjectName("ghost")
         calib.setFixedSize(180, 52)
         calib.clicked.connect(self.calib_requested.emit)
@@ -768,3 +768,107 @@ class CalibScreen(QWidget):
             self._etat.setText(text)
             set_status_style(self._etat, ok)
 
+
+
+class ServoCalibScreen(QWidget):
+    """Calibration d'un servo des foils.
+    - / + deplacent le servo (1 ou 10 µs, maintenir pour repeter) ;
+    Enregistrer sauve la position comme Min / Neutre / Max dans l'EEPROM
+    du Teensy. Terminer : le servo retourne a son neutre (s'il est valide)."""
+    pas_requested = Signal(int)          # µs
+    enregistrer_requested = Signal(str)  # "min" / "neutre" / "max"
+    terminer_requested = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.servo = 0
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 14, 22, 14)
+        root.setSpacing(8)
+
+        bar = QHBoxLayout()
+        self._titre = QLabel("Servo")
+        self._titre.setObjectName("title")
+        bar.addWidget(self._titre)
+        bar.addStretch()
+        fin = QPushButton("Terminer")
+        fin.setObjectName("ghost")
+        fin.setFixedSize(150, 52)
+        fin.clicked.connect(self.terminer_requested.emit)
+        bar.addWidget(fin)
+        root.addLayout(bar)
+
+        hint = QLabel("Switch ON coupé. Avancer doucement vers chaque butée, s'arrêter au "
+                      "premier contact et reculer de 30 à 50 µs avant d'enregistrer.")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        root.addWidget(hint)
+
+        self._pos = QLabel("-- µs")
+        self._pos.setObjectName("escValue")
+        self._pos.setAlignment(CENTER)
+        root.addWidget(self._pos, 1)
+        self._deg = QLabel("")
+        self._deg.setObjectName("hint")
+        self._deg.setAlignment(CENTER)
+        root.addWidget(self._deg)
+
+        pas = QHBoxLayout()
+        pas.setSpacing(10)
+        self._pas = []
+        for d in (-cfg.SERVO_PAS_GROS, -cfg.SERVO_PAS_FIN, cfg.SERVO_PAS_FIN, cfg.SERVO_PAS_GROS):
+            b = QPushButton("%+d" % d)
+            b.setObjectName("servoPas")
+            b.setAutoRepeat(True)               # maintenir = repeter
+            b.setAutoRepeatDelay(400)
+            b.setAutoRepeatInterval(100)
+            b.clicked.connect(lambda _=False, v=d: self.pas_requested.emit(v))
+            pas.addWidget(b, 1)
+            self._pas.append(b)
+        root.addLayout(pas)
+
+        enr = QHBoxLayout()
+        enr.setSpacing(10)
+        self._enr = []
+        for k, lab in cfg.SERVO_VALEURS:
+            b = QPushButton()
+            b.setObjectName("servoEnr")
+            b.clicked.connect(lambda _=False, v=k: self.enregistrer_requested.emit(v))
+            enr.addWidget(b, 1)
+            self._enr.append((b, lab))
+        root.addLayout(enr)
+
+        self._etat = QLabel("")
+        self._etat.setAlignment(CENTER)
+        self._etat.setWordWrap(True)
+        set_status_style(self._etat, None)
+        root.addWidget(self._etat)
+        self._actif(False)
+
+    def ouvrir(self, i: int):
+        self.servo = i
+        self._titre.setText("Calibration servo " + cfg.SERVO_NOMS[i])
+        self._pos.setText("-- µs")
+        self._deg.setText("")
+        self._etat.setText("En attente du Teensy...")
+        set_status_style(self._etat, None)
+        for b, lab in self._enr:
+            b.setText("Enregistrer %s\n--" % lab)
+        self._actif(False)
+
+    def _actif(self, oui: bool):
+        for b in self._pas:
+            b.setEnabled(oui)
+        for b, _ in self._enr:
+            b.setEnabled(oui)
+
+    def update_data(self, d: dict):
+        i = self.servo
+        self._actif(cfg.servo_calib_actif(d) == i)
+        self._pos.setText(cfg.servo_pos_text(d, i))
+        self._deg.setText(cfg.servo_pos_deg_text(d, i))
+        for n, (b, lab) in enumerate(self._enr):
+            b.setText("Enregistrer %s\n%s" % (lab, cfg.servo_valeur_text(d, i, n)))
+        texte, ok = cfg.servo_calib_message(d, i)
+        self._etat.setText(texte)
+        set_status_style(self._etat, ok)

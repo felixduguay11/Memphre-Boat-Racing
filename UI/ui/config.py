@@ -364,6 +364,115 @@ def calib_resultat(d: dict):
     return CALIB_RESULTATS.get(n, "resultat %d" % n), (None if n == 0 else n == 1)
 
 
+# ------------------------------------------------------------ calibration des servos
+# Bouton Calibration de l'accueil -> pop-up : Levier ou un des 3 servos.
+# Le Teensy (servos.cpp) commande le servo choisi en µs ; + / - le
+# deplacent, Enregistrer sauve la position comme Min / Neutre / Max en
+# EEPROM (gardee au redemarrage et apres un reflash).
+# Trame : "sv": {"c": servo en calibration (-1 aucun), "us": sa position,
+#   "r": dernier resultat, "k": derniere valeur enregistree (0 min,
+#   1 neutre, 2 max), "cal": [[min, neutre, max, valide] x 3]} en µs,
+#   0 = pas enregistre. Ordre : 0 avant, 1 arriere gauche, 2 arriere droit.
+SERVO_NOMS = ["avant", "arrière gauche", "arrière droit"]
+SERVO_CLES = ["av", "ag", "ad"]          # cles de foils.cmd, meme ordre
+SERVO_PAS_FIN = 1                        # µs, boutons - / +
+SERVO_PAS_GROS = 10                      # µs, boutons -- / ++
+SERVO_US_CENTRE = 1500                   # centre du servo (reglage d'usine)
+SERVO_US_PAR_DEG = 10.0                  # 10 µs = 1° au palonnier (SERVO_US_PAR_DEG de config.h)
+SERVO_VALEURS = [("min", "Min"), ("neutre", "Neutre"), ("max", "Max")]   # ordre de "cal"
+SERVO_FIN_PAYLOAD = {"cmd": "servo_fin"}
+# Signe de vie tant que l'ecran de calibration est ouvert : sans lui
+# pendant SERVO_CALIB_VIE_MS (config.h, 1 s), le Teensy arrete la calibration.
+SERVO_VIE_PAYLOAD = {"cmd": "servo_vie"}
+SERVO_VIE_MS = 200
+
+
+def servo_calib_payload(i: int) -> dict:
+    return {"cmd": "servo_calib", "s": i}
+
+
+def servo_pas_payload(d: int) -> dict:
+    return {"cmd": "servo_pas", "d": d}
+
+
+def servo_enr_payload(k: str) -> dict:
+    return {"cmd": "servo_enr", "k": k}
+
+
+def _sv(d: dict) -> dict:
+    return d.get("sv") or {}
+
+
+def servo_calib_actif(d: dict) -> int:
+    """Servo en calibration (0..2), -1 si aucun."""
+    try:
+        return int(_sv(d).get("c", -1))
+    except (TypeError, ValueError):
+        return -1
+
+
+def servo_deg(us: float) -> float:
+    """Angle du palonnier par rapport au centre du servo (1500 µs)."""
+    return (us - SERVO_US_CENTRE) / SERVO_US_PAR_DEG
+
+
+def servo_cal(d: dict, i: int):
+    """(min, neutre, max, valide) en µs (0 = pas enregistre), ou None."""
+    cal = _sv(d).get("cal") or []
+    if i >= len(cal) or len(cal[i]) < 4:
+        return None
+    mn, neu, mx, ok = cal[i][:4]
+    return int(mn), int(neu), int(mx), bool(ok)
+
+
+def servo_pos_text(d: dict, i: int) -> str:
+    if servo_calib_actif(d) != i or "us" not in _sv(d):
+        return "-- µs"
+    return "%d µs" % _sv(d)["us"]
+
+
+def servo_pos_deg_text(d: dict, i: int) -> str:
+    if servo_calib_actif(d) != i or "us" not in _sv(d):
+        return ""
+    return "%+.1f° (palonnier, depuis le centre du servo)" % servo_deg(_sv(d)["us"])
+
+
+def servo_valeur_text(d: dict, i: int, k: int) -> str:
+    c = servo_cal(d, i)
+    return "%d µs" % c[k] if c and c[k] else "--"
+
+
+SERVO_FINS = {
+    2: "Refusée : couper le switch ON",
+    4: "Arrêtée : le switch ON a été activé",
+    5: "Arrêtée : le Teensy ne recevait plus l'écran",
+}
+
+
+def servo_calib_message(d: dict, i: int):
+    """(texte, ok) sous les boutons ; ok = None : neutre."""
+    sv = _sv(d)
+    if not sv:
+        return "Pas de données servos dans la trame (firmware à jour ?)", False
+    r = int(sv.get("r", 0))
+    if servo_calib_actif(d) != i:
+        return SERVO_FINS.get(r, "En attente du Teensy..."), (False if r in SERVO_FINS else None)
+    c = servo_cal(d, i)
+    if c is None:
+        return "", None
+    prefixe = ""
+    if r == 1:
+        k = int(sv.get("k", 0))
+        if 0 <= k < 3 and c[k]:
+            prefixe = "%s enregistré : %d µs. " % (SERVO_VALEURS[k][1], c[k])
+    manque = [lab for n, (_, lab) in enumerate(SERVO_VALEURS) if not c[n]]
+    if manque:
+        return prefixe + "À enregistrer : " + ", ".join(manque), None
+    if not c[3]:
+        return prefixe + "Il faut Min < Neutre < Max", False
+    return prefixe + "Calibration valide", True
+
+
 # ------------------------------------------------------------ cruise control
 # Case « Cruise control » en bas a droite de la page Moteurs :
 #   cruise arrete -> pop-up a 3 choix : ERPM / vitesse GPS / Annuler
@@ -550,7 +659,7 @@ def altitude_text(d: dict) -> str:
 #   "son":   {"av", "ag", "ad"}  distance des sonars, cm     (SONARS_ACTIFS)
 #   "sio":   {"av", "ag", "ad"}  sortie TOR, 1 = mesure valide
 #   "foils": {"on", "cmd": {av, ag, ad}, "h": {av, ag, ad}, "p", "r"}  (FOILS_ACTIFS)
-#            on = 1 en CONTROLE ; cmd = commande envoyee au servo (°) ;
+#            on = 1 en CONTROLE ; cmd = commande envoyee au servo (µs, 0 = pas commande) ;
 #            h = sortie du PID de hauteur, p / r = sorties PID pitch / roll.
 # Un bloc absent (option a 0 dans config.h) s'affiche "--" et
 # "absent de la trame" : jamais une valeur inventee.
@@ -569,12 +678,8 @@ FOIL_CHANNELS: List[FoilChannel] = [
     FoilChannel("ad", "Arr. droit"),
 ]
 
-# Memes valeurs que SERVO_xxx_NEUTRAL / _MIN / _MAX de config.h (affichage)
-SERVO_NEUTRAL = {"av": 148, "ag": 148, "ad": 148}
-SERVO_MIN = {"av": 120, "ag": 120, "ad": 120}
-SERVO_MAX = {"av": 163, "ag": 163, "ad": 163}
+# Min / Neutre / Max de chaque servo : calibration envoyee par le Teensy ("sv").
 SONAR_UNIT = "cm"
-SERVO_UNIT = "°"
 
 
 def _son(d: dict) -> dict:
@@ -601,23 +706,34 @@ def sonar_status(d: dict, key: str):
 
 
 def servo_value(d: dict, key: str):
-    """Commande du servo en degres, ou None."""
-    return (_foils(d).get("cmd") or {}).get(key)
+    """Commande du servo en µs, ou None (absente ou servo pas commande)."""
+    v = (_foils(d).get("cmd") or {}).get(key)
+    return v if v else None
+
+
+def _servo_cal_cle(d: dict, key: str):
+    return servo_cal(d, SERVO_CLES.index(key)) if key in SERVO_CLES else None
 
 
 def servo_text(d: dict, key: str) -> str:
+    c = _servo_cal_cle(d, key)
+    if c is not None and not c[3]:
+        return "Servo : non calibré"
     v = servo_value(d, key)
     if v is None:
         return "Servo : --"
-    return "Servo %.0f°  (%+.0f)" % (v, v - SERVO_NEUTRAL.get(key, 0))
+    if c is None:
+        return "Servo %d µs" % v
+    return "Servo %d µs  (%+.1f°)" % (v, (v - c[1]) / SERVO_US_PAR_DEG)
 
 
 def servo_pct(d: dict, key: str):
-    """Position de la commande entre min (0) et max (100), ou None."""
+    """Position de la commande entre Min (0) et Max (100), ou None."""
     v = servo_value(d, key)
-    if v is None:
+    c = _servo_cal_cle(d, key)
+    if v is None or c is None or not c[3]:
         return None
-    lo, hi = SERVO_MIN.get(key, 0), SERVO_MAX.get(key, 180)
+    lo, hi = c[0], c[2]
     return max(0.0, min(100.0, (v - lo) * 100.0 / (hi - lo))) if hi > lo else None
 
 

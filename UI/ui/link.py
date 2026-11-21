@@ -182,6 +182,9 @@ class SimLink(BaseLink):
         self._tn = {}               # (index ESC, capteur) -> niveau de temperature
         self._b12_att, self._b12_bas, self._b12_arret = False, None, False
         self._cap = False                 # plafond batterie basse (comme le Teensy)
+        # Calibration des servos (comme servos.cpp) : [min, neutre, max] en µs, 0 = pas enregistre
+        self._sv_cal = [[0, 0, 0] for _ in range(3)]
+        self._sv_c, self._sv_us, self._sv_r, self._sv_k, self._sv_vie = -1, 1500, 0, 1, 0.0
         self._timer = QTimer(self)
         self._timer.setInterval(period_ms)
         self._timer.timeout.connect(self._tick)
@@ -211,6 +214,10 @@ class SimLink(BaseLink):
             self._cal, self._cres = False, 1
         elif cmd == "calib_annule" and self._cal:
             self._cal, self._cres = False, 4
+        elif isinstance(cmd, str) and cmd.startswith("servo_"):
+            self._servo_cmd(obj)
+            if cmd in ("servo_vie", "servo_pas"):
+                return                          # frequents : pas de message
         elif cmd == "escconf":
             QTimer.singleShot(100, self._emit_escconf)
         elif cmd in ("batt_basse", "batt_ok"):
@@ -245,6 +252,49 @@ class SimLink(BaseLink):
         if n == 0 and t >= self.SIM_T_ATTENTION:
             n = 1
         return n
+
+    # ------------------------------------------------------------ servos (simulation)
+    SIM_SWITCH_ON = False       # pour les essais : refuse / arrete la calibration
+
+    @staticmethod
+    def _sv_valide(c) -> bool:
+        return 900 <= c[0] < c[1] < c[2] <= 2100
+
+    def _servo_cmd(self, obj: dict):
+        cmd = obj.get("cmd")
+        if cmd == "servo_calib":
+            s = int(obj.get("s", -1))
+            if not 0 <= s < 3:
+                return
+            if self.SIM_SWITCH_ON:
+                self._sv_c, self._sv_r = -1, 2
+                return
+            self._sv_c, self._sv_r = s, 0
+            self._sv_us = self._sv_cal[s][1] or 1500
+            self._sv_vie = time.monotonic()
+            return
+        if self._sv_c < 0:
+            return
+        self._sv_vie = time.monotonic()
+        if cmd == "servo_pas":
+            d = max(-50, min(50, int(obj.get("d", 0))))
+            self._sv_us = max(900, min(2100, self._sv_us + d))
+        elif cmd == "servo_enr":
+            k = {"min": 0, "neutre": 1, "max": 2}.get(obj.get("k"))
+            if k is not None:
+                self._sv_cal[self._sv_c][k] = self._sv_us
+                self._sv_r, self._sv_k = 1, k
+        elif cmd == "servo_fin":
+            self._sv_c, self._sv_r = -1, 3
+
+    def _sv_trame(self) -> dict:
+        if self._sv_c >= 0:
+            if self.SIM_SWITCH_ON:
+                self._sv_c, self._sv_r = -1, 4
+            elif time.monotonic() - self._sv_vie > 1.0:
+                self._sv_c, self._sv_r = -1, 5
+        return {"c": self._sv_c, "us": self._sv_us, "r": self._sv_r, "k": self._sv_k,
+                "cal": [c + [int(self._sv_valide(c))] for c in self._sv_cal]}
 
     def _batt12(self) -> dict:
         """Comme BattSecMaj() du watchdog (sans la moyenne) : attention avec
@@ -416,6 +466,7 @@ class SimLink(BaseLink):
             run = "CONTROLE" if ctl else "FORWARD"
         self.telemetry.emit({"t": n * self._timer.interval(),
                              "mode": "ARRET" if self._b12_arret else "RUN", "b12": b12,
+                             "sv": self._sv_trame(),
                              "run": run, "arme": int(self._arme),
                              "son": son, "sio": sio, "foils": foils, "target": self._target,
                              "ramped": int(erpm), "esc": escs, "cmode": "ERPM",
