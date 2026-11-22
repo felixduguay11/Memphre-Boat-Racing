@@ -598,9 +598,9 @@
 #define RX_Moteur                   30
 #define TX_Moteur                   31
 #define DC_DC_3V3                   32   // SORTIE : DC-DC (ON si I_But_Start OFF, OFF 3 s après I_But_Start ON)
-#define I_O_Sonar_Avant             33
+#define I_O_Sonar_Avant             35
 #define I_O_Sonar_Arriere_Gauche    34
-#define I_O_Sonar_Arriere_Droit     35
+#define I_O_Sonar_Arriere_Droit     33
 //#define PIN_36                      36
 //#define PIN_37                      37
 #define I_Switch_ON                 38
