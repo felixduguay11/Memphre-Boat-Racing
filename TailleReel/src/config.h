@@ -492,7 +492,7 @@
 // Armé : {"cmd":"foils_on"} (pop-up confirmé). Désarmé : {"cmd":"foils_off"}
 //   (2e appui), Stop de l'UI, switch ON coupé (IDLE), ARRET. Armé, on
 //   revient seul en CONTROLE quand les conditions sont de nouveau là.
-#define FOILS_CONDITION_VITESSE  1      // 0 = pas de condition de vitesse : le bouton suffit
+#define FOILS_CONDITION_VITESSE  0      // 0 = pas de condition de vitesse : le bouton suffit
 #define SM_VITESSE_CONTROLE_KMH  12.0f
 #define SM_VITESSE_HYST_KMH      1.0f
 #define FSM_QUEUE_LEN            8
