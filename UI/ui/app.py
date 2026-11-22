@@ -13,7 +13,9 @@ from . import config as cfg
 from . import theme
 from .link import make_link
 from .screens import (StartScreen, TelemetryScreen, XsensScreen, BmsScreen,
-                      FoilsScreen, FlashScreen, CalibScreen)
+                      FoilsScreen, FlashScreen, CalibScreen, ServoCalibScreen,
+                      SonarZeroScreen)
+from .calib_popup import CalibPopup
 from .bms import make_bms
 from .flasher import TeensyFlasher
 from .logger import TelemetryLogger
@@ -34,6 +36,8 @@ class MainWindow(QStackedWidget):
         self.foils_screen = FoilsScreen()
         self.flash_screen = FlashScreen()
         self.calib_screen = CalibScreen()
+        self.servo_calib_screen = ServoCalibScreen()
+        self.sonar_zero_screen = SonarZeroScreen()
         self.addWidget(self.start_screen)
         self.addWidget(self.telemetry_screen)
         self.addWidget(self.xsens_screen)
@@ -41,6 +45,8 @@ class MainWindow(QStackedWidget):
         self.addWidget(self.foils_screen)
         self.addWidget(self.flash_screen)
         self.addWidget(self.calib_screen)
+        self.addWidget(self.servo_calib_screen)
+        self.addWidget(self.sonar_zero_screen)
 
         # Pages de telemetrie (onglets), toutes alimentees par la trame
         self._pages = {"moteurs": self.telemetry_screen, "xsens": self.xsens_screen,
@@ -77,7 +83,24 @@ class MainWindow(QStackedWidget):
         self.start_screen.quit_requested.connect(self._quit)
         self.start_screen.theme_toggled.connect(self._toggle_theme)
         self.start_screen.flash_requested.connect(self._open_flash)
-        self.start_screen.calib_requested.connect(self._open_calib)
+        # Calibration : pop-up Levier / servo avant / arr. gauche / arr. droit
+        self.calib_popup = CalibPopup(self.start_screen)
+        self.start_screen.calib_requested.connect(self.calib_popup.ouvrir)
+        self.calib_popup.levier.connect(self._open_calib)
+        self.calib_popup.servo.connect(self._open_servo_calib)
+        self.calib_popup.sonars.connect(self._open_sonar_zero)
+        self.sonar_zero_screen.mesurer_requested.connect(
+            lambda: self.link.send(cfg.SONAR_ZERO_PAYLOAD))
+        self.sonar_zero_screen.terminer_requested.connect(self._close_sonar_zero)
+        self.servo_calib_screen.pas_requested.connect(
+            lambda d: self.link.send(cfg.servo_pas_payload(d)))
+        self.servo_calib_screen.enregistrer_requested.connect(
+            lambda k: self.link.send(cfg.servo_enr_payload(k)))
+        self.servo_calib_screen.terminer_requested.connect(self._close_servo_calib)
+        # Signe de vie tant que l'ecran de calibration des servos est ouvert
+        self._servo_vie = QTimer(self)
+        self._servo_vie.setInterval(cfg.SERVO_VIE_MS)
+        self._servo_vie.timeout.connect(lambda: self.link.send(cfg.SERVO_VIE_PAYLOAD))
         self.calib_screen.start_requested.connect(
             lambda: self.link.send(cfg.CALIB_START_PAYLOAD))
         self.calib_screen.finish_requested.connect(
@@ -98,6 +121,8 @@ class MainWindow(QStackedWidget):
         # sort du cruise).
         # (lambda : l'envoi se fait dans le fil de l'UI, comme les autres commandes)
         self.telemetry_screen.cruise_requested.connect(
+            lambda payload: self.link.send(payload))
+        self.telemetry_screen.foils_requested.connect(
             lambda payload: self.link.send(payload))
         self._cruise_vie = QTimer(self)
         self._cruise_vie.setInterval(cfg.CRUISE_VIE_MS)
@@ -144,6 +169,10 @@ class MainWindow(QStackedWidget):
             self.logger.write(d)            # le BMS a ses propres lignes
         elif self.currentWidget() is self.calib_screen:
             self.calib_screen.update_data(d)
+        elif self.currentWidget() is self.servo_calib_screen:
+            self.servo_calib_screen.update_data(d)
+        elif self.currentWidget() is self.sonar_zero_screen:
+            self.sonar_zero_screen.update_data(d)
 
     # ------------------------------------------------------------ BMS
     def _on_bms(self, sample: dict):
@@ -243,6 +272,9 @@ class MainWindow(QStackedWidget):
         Le lien est ferme par main() apres la boucle Qt."""
         self.logger.stop()
         self._cruise_vie.stop()
+        if self._servo_vie.isActive():
+            self._servo_vie.stop()
+            self.link.send(cfg.SERVO_FIN_PAYLOAD)
         self.link.send(cfg.STOP_PAYLOAD)        # "stop" coupe aussi le cruise
         QApplication.quit()
 
@@ -271,6 +303,30 @@ class MainWindow(QStackedWidget):
 
     def _close_calib(self):
         self.link.send(cfg.CALIB_ANNULE_PAYLOAD)   # sans effet si rien en cours
+        self.link.send(cfg.STOP_PAYLOAD)
+        self.setCurrentWidget(self.start_screen)
+
+    # ------------------------------------------------------------ calibration servos
+    def _open_servo_calib(self, i: int):
+        self.servo_calib_screen.ouvrir(i)
+        self.setCurrentWidget(self.servo_calib_screen)
+        self.link.send(cfg.START_PAYLOAD)          # telemetrie (position, valeurs)
+        self.link.send(cfg.servo_calib_payload(i))
+        self._servo_vie.start()
+
+    def _close_servo_calib(self):
+        self._servo_vie.stop()
+        self.link.send(cfg.SERVO_FIN_PAYLOAD)
+        self.link.send(cfg.STOP_PAYLOAD)
+        self.setCurrentWidget(self.start_screen)
+
+    # ------------------------------------------------------------ zero des sonars
+    def _open_sonar_zero(self):
+        self.sonar_zero_screen.ouvrir()
+        self.setCurrentWidget(self.sonar_zero_screen)
+        self.link.send(cfg.START_PAYLOAD)          # telemetrie (distances, zero)
+
+    def _close_sonar_zero(self):
         self.link.send(cfg.STOP_PAYLOAD)
         self.setCurrentWidget(self.start_screen)
 

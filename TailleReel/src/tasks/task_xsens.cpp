@@ -334,8 +334,9 @@ void Task_Xsens(void *ptr)
             {
                 Xsens_data.att_valid = s_mti._att_valid;
                 if (s_mti._att_valid) {
-                    Xsens_data.roll  = s_mti._roll;
-                    Xsens_data.pitch = s_mti._pitch;
+                    // Convention du bateau (config.h, MTi tourné de 180° autour de Z)
+                    Xsens_data.roll  = XSENS_SENS_ROLL  * s_mti._roll;
+                    Xsens_data.pitch = XSENS_SENS_PITCH * s_mti._pitch;
                     Xsens_data.yaw   = s_mti._yaw;
                 }
 
@@ -377,4 +378,4 @@ void Task_Xsens(void *ptr)
         wd_vivant(T_XSENS);
         vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(PERIODE_Xsens_MS));
     }
-}
+}

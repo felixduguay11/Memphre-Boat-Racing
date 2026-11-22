@@ -13,6 +13,7 @@ from . import config as cfg
 from .widgets import (Card, RowCard, SpeedCard, Badge, EscCard, MultiCard, ChargeCard,
                       FoilCard, set_status_style)
 from .cruise_popup import CruisePopup
+from .foils_popup import FoilsPopup
 
 CENTER = Qt.AlignmentFlag.AlignCenter
 
@@ -156,7 +157,7 @@ class StartScreen(QWidget):
         flash.setFixedSize(220, 52)
         flash.clicked.connect(self.flash_requested.emit)
         bar.addWidget(flash)
-        calib = QPushButton("Calibrer levier")
+        calib = QPushButton("Calibration")
         calib.setObjectName("ghost")
         calib.setFixedSize(180, 52)
         calib.clicked.connect(self.calib_requested.emit)
@@ -267,12 +268,13 @@ class FlashScreen(QWidget):
 
 
 class TelemetryScreen(QWidget):
-    """Page Moteurs : batterie / courant / puissance, une carte par ESC,
-    et en bas Stop, le timer du cruise et la case Cruise control.
-    Cartes generees depuis cfg."""
+    """Page Moteurs : courant moteur / puissance, une carte par ESC,
+    et en bas Stop, le timer (foils_control ou cruise), le bouton Foils
+    et la case Cruise control. Cartes generees depuis cfg."""
     stopped = Signal()
     page_requested = Signal(str)
     cruise_requested = Signal(dict)     # commande a envoyer au Teensy
+    foils_requested = Signal(dict)      # idem (bouton Foils)
 
     def __init__(self, metrics=None, esc_ids=None):
         super().__init__()
@@ -286,7 +288,7 @@ class TelemetryScreen(QWidget):
         self._bar = _PageBar("moteurs", self.page_requested.emit)
         root.addLayout(self._bar)
 
-        # Rangee du haut : V | A | W dans une carte (moitie gauche),
+        # Rangee du haut : courant moteur | puissance dans une carte (moitie gauche),
         # charge batterie du BMS (moitie droite).
         top = QHBoxLayout()
         top.setSpacing(8)
@@ -316,7 +318,7 @@ class TelemetryScreen(QWidget):
         grid.setColumnStretch(2, 1)
         root.addLayout(grid, 1)     # les cartes ESC prennent la hauteur libre
 
-        # Rangee du bas : Stop | timer du cruise | case Cruise control
+        # Rangee du bas : Stop | timer (foils_control, sinon cruise) | Foils | Cruise control
         bas = QHBoxLayout()
         bas.setSpacing(8)
         stop = _stop_button(self.stopped.emit)
@@ -338,9 +340,16 @@ class TelemetryScreen(QWidget):
         col.addWidget(self._cruise_timer)
         col.addWidget(self._cruise_info)
         bas.addLayout(col, 1)
+        self._foils_appui = 0.0                 # dernier armement (affichage d'un refus)
+        self._foils_btn = QPushButton("Foils")
+        self._foils_btn.setObjectName("foils")
+        self._foils_btn.setFixedWidth(170)
+        self._foils_btn.setEnabled(False)
+        self._foils_btn.clicked.connect(self._on_foils)
+        bas.addWidget(self._foils_btn)
         self._cruise_btn = QPushButton("Cruise control")
         self._cruise_btn.setObjectName("cruise")
-        self._cruise_btn.setFixedWidth(260)
+        self._cruise_btn.setFixedWidth(230)
         self._cruise_btn.setEnabled(False)
         self._cruise_btn.clicked.connect(self._on_cruise)
         bas.addWidget(self._cruise_btn)
@@ -348,6 +357,20 @@ class TelemetryScreen(QWidget):
 
         self._popup = CruisePopup(self)
         self._popup.choisi.connect(self._on_choix)
+        self._foils_popup = FoilsPopup(self)
+        self._foils_popup.confirme.connect(self._on_foils_confirme)
+
+    def _on_foils(self):
+        """Armé : désarmer tout de suite. Sinon : pop-up de confirmation."""
+        if cfg.foils_arme(self._dernier):
+            self.foils_requested.emit(dict(cfg.FOILS_OFF_PAYLOAD))
+        else:
+            self._popup.fermer()
+            self._foils_popup.ouvrir(self._dernier)
+
+    def _on_foils_confirme(self):
+        self._foils_appui = time.monotonic()
+        self.foils_requested.emit(dict(cfg.FOILS_ON_PAYLOAD))
 
     def _on_cruise(self):
         """Cruise actif : arret (la telemetrie continue). Sinon : pop-up
@@ -355,6 +378,7 @@ class TelemetryScreen(QWidget):
         if self._cruise_mode != cfg.CRUISE_OFF:
             self.cruise_requested.emit(dict(cfg.CRUISE_OFF_PAYLOAD))
         else:
+            self._foils_popup.fermer()
             self._popup.ouvrir(self._dernier)
 
     def _on_choix(self, mode: int):
@@ -387,11 +411,38 @@ class TelemetryScreen(QWidget):
             info = cfg.cruise_fin_text(d) if recent else ""
         else:
             info = cfg.cruise_fin_text(d)
+        self._update_foils(d, actif, rearme, info)
+
+    def _update_foils(self, d: dict, cruise_actif: int, rearme: bool, info_cruise: str):
+        """Bouton Foils, et timer / info partagés avec le cruise : durée en
+        foils_control dès que les foils sont actifs, sinon celle du cruise."""
+        arme, ctl = cfg.foils_arme(d), cfg.foils_actif(d)
+        b = self._foils_btn
+        b.setText(cfg.foils_bouton_texte(d))
+        b.setEnabled(arme or cfg.foils_possible(d))
+        self._set_name(b, "foilsOn" if ctl else ("foilsArme" if arme else "foils"))
+        self._foils_popup.maj(d)
+        if ctl:
+            self._cruise_timer.setText(cfg.foils_timer_text(d))
+            self._set_name(self._cruise_timer, "cruiseTimerOn")
+        info, alerte = info_cruise, rearme
+        if not cruise_actif and not rearme:
+            n = cfg.foils_fin(d)
+            if ctl:
+                info = "foils_control actif"
+            elif arme:
+                info = "Foils armé · " + cfg.foils_condition_court(d)
+            elif n in cfg.FOILS_REFUS:
+                if time.monotonic() - self._foils_appui < cfg.CRUISE_REFUS_AFFICHE_S:
+                    info, alerte = cfg.foils_fin_text(d), True
+            elif n and not info:
+                info = cfg.foils_fin_text(d)
         self._cruise_info.setText(info)
-        self._set_name(self._cruise_info, "cruiseInfoRearme" if rearme else "cruiseInfo")
+        self._set_name(self._cruise_info, "cruiseInfoRearme" if alerte else "cruiseInfo")
 
     def hideEvent(self, ev):
         self._popup.fermer()                    # changement d'onglet, Stop
+        self._foils_popup.fermer()
         super().hideEvent(ev)
 
     @staticmethod
@@ -407,13 +458,15 @@ class TelemetryScreen(QWidget):
         self._speed.set_sub(cfg.target_short(d))
         self._update_cruise(d)
 
-        texts = []
+        texts, alertes = [], []
         for m in self._metrics:
             try:
                 texts.append(m.value(d))
+                alertes.append(bool(m.alerte and m.alerte(d)))
             except Exception:
                 texts.append("--")
-        self._power.set_values(texts)
+                alertes.append(False)
+        self._power.set_values(texts, alertes)
         self.update_bms(d)
 
         seen = set()
@@ -628,8 +681,8 @@ class BmsScreen(QWidget):
 
 class FoilsScreen(QWidget):
     """Page Foils : pour chaque foil, hauteur lue par le sonar, validite
-    du sonar et commande du servo. Ligne du bas : etat du controle et
-    sorties des PID."""
+    du sonar et commande du servo. En bas : etat du controle, et en gros
+    le pitch et le roll du bateau (Xsens) avec la sortie de leur PID."""
     stopped = Signal()
     page_requested = Signal(str)
 
@@ -656,14 +709,31 @@ class FoilsScreen(QWidget):
         info = QFrame()
         info.setObjectName("card")
         lay = QHBoxLayout(info)
-        lay.setContentsMargins(12, 6, 12, 6)
+        lay.setContentsMargins(12, 4, 12, 4)
+        lay.setSpacing(16)
         self._state = QLabel("--")
+        self._state.setWordWrap(True)
         set_status_style(self._state, None)
-        lay.addWidget(self._state)
-        lay.addStretch()
-        self._info = QLabel("--")
-        self._info.setObjectName("smallValue")
-        lay.addWidget(self._info)
+        lay.addWidget(self._state, 1)
+        self._angles = {}
+        for key, pid, nom in (("pitch", "p", "Pitch"), ("roll", "r", "Roll")):
+            col = QVBoxLayout()
+            col.setSpacing(0)
+            haut = QHBoxLayout()
+            lab = QLabel(nom)
+            lab.setObjectName("cardLabel")
+            sortie = QLabel("")
+            sortie.setObjectName("hint")
+            haut.addWidget(lab)
+            haut.addStretch()
+            haut.addWidget(sortie)
+            val = QLabel("--")
+            val.setObjectName("foilsAngle")
+            val.setAlignment(CENTER)
+            col.addLayout(haut)
+            col.addWidget(val)
+            lay.addLayout(col, 1)
+            self._angles[key] = (pid, val, sortie)
         root.addWidget(info)
 
         root.addWidget(_stop_button(self.stopped.emit))
@@ -677,7 +747,9 @@ class FoilsScreen(QWidget):
         text, ok = cfg.foils_status(d)
         self._state.setText(text)
         set_status_style(self._state, ok)
-        self._info.setText(cfg.foils_info(d))
+        for key, (pid, val, sortie) in self._angles.items():
+            val.setText(cfg.foils_angle_text(d, key))
+            sortie.setText(cfg.foils_pid_text(d, pid))
 
 
 class CalibScreen(QWidget):
@@ -766,3 +838,197 @@ class CalibScreen(QWidget):
             self._etat.setText(text)
             set_status_style(self._etat, ok)
 
+
+
+class ServoCalibScreen(QWidget):
+    """Calibration d'un servo des foils.
+    - / + deplacent le servo (1 ou 10 µs, maintenir pour repeter) ;
+    Enregistrer sauve la position comme Min / Neutre / Max dans l'EEPROM
+    du Teensy. Terminer : le servo retourne a son neutre (s'il est valide)."""
+    pas_requested = Signal(int)          # µs
+    enregistrer_requested = Signal(str)  # "min" / "neutre" / "max"
+    terminer_requested = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.servo = 0
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 14, 22, 14)
+        root.setSpacing(8)
+
+        bar = QHBoxLayout()
+        self._titre = QLabel("Servo")
+        self._titre.setObjectName("title")
+        bar.addWidget(self._titre)
+        bar.addStretch()
+        fin = QPushButton("Terminer")
+        fin.setObjectName("ghost")
+        fin.setFixedSize(150, 52)
+        fin.clicked.connect(self.terminer_requested.emit)
+        bar.addWidget(fin)
+        root.addLayout(bar)
+
+        hint = QLabel("Switch ON coupé. Avancer doucement vers chaque butée, s'arrêter au "
+                      "premier contact et reculer de 30 à 50 µs avant d'enregistrer.")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        root.addWidget(hint)
+
+        self._pos = QLabel("-- µs")
+        self._pos.setObjectName("escValue")
+        self._pos.setAlignment(CENTER)
+        root.addWidget(self._pos, 1)
+        self._deg = QLabel("")
+        self._deg.setObjectName("hint")
+        self._deg.setAlignment(CENTER)
+        root.addWidget(self._deg)
+
+        pas = QHBoxLayout()
+        pas.setSpacing(10)
+        self._pas = []
+        for d in (-cfg.SERVO_PAS_GROS, -cfg.SERVO_PAS_FIN, cfg.SERVO_PAS_FIN, cfg.SERVO_PAS_GROS):
+            b = QPushButton("%+d" % d)
+            b.setObjectName("servoPas")
+            b.setAutoRepeat(True)               # maintenir = repeter
+            b.setAutoRepeatDelay(400)
+            b.setAutoRepeatInterval(100)
+            b.clicked.connect(lambda _=False, v=d: self.pas_requested.emit(v))
+            pas.addWidget(b, 1)
+            self._pas.append(b)
+        root.addLayout(pas)
+
+        enr = QHBoxLayout()
+        enr.setSpacing(10)
+        self._enr = []
+        for k, lab in cfg.SERVO_VALEURS:
+            b = QPushButton()
+            b.setObjectName("servoEnr")
+            b.clicked.connect(lambda _=False, v=k: self.enregistrer_requested.emit(v))
+            enr.addWidget(b, 1)
+            self._enr.append((b, lab))
+        root.addLayout(enr)
+
+        self._etat = QLabel("")
+        self._etat.setAlignment(CENTER)
+        self._etat.setWordWrap(True)
+        set_status_style(self._etat, None)
+        root.addWidget(self._etat)
+        self._actif(False)
+
+    def ouvrir(self, i: int):
+        self.servo = i
+        self._titre.setText("Calibration servo " + cfg.SERVO_NOMS[i])
+        self._pos.setText("-- µs")
+        self._deg.setText("")
+        self._etat.setText("En attente du Teensy...")
+        set_status_style(self._etat, None)
+        for b, lab in self._enr:
+            b.setText("Enregistrer %s\n--" % lab)
+        self._actif(False)
+
+    def _actif(self, oui: bool):
+        for b in self._pas:
+            b.setEnabled(oui)
+        for b, _ in self._enr:
+            b.setEnabled(oui)
+
+    def update_data(self, d: dict):
+        i = self.servo
+        self._actif(cfg.servo_calib_actif(d) == i)
+        self._pos.setText(cfg.servo_pos_text(d, i))
+        self._deg.setText(cfg.servo_pos_deg_text(d, i))
+        for n, (b, lab) in enumerate(self._enr):
+            b.setText("Enregistrer %s\n%s" % (lab, cfg.servo_valeur_text(d, i, n)))
+        texte, ok = cfg.servo_calib_message(d, i)
+        self._etat.setText(texte)
+        set_status_style(self._etat, ok)
+
+
+class SonarZeroScreen(QWidget):
+    """Zero des sonars, sur l'eau : bateau au repos, switch ON coupe.
+    Mesurer -> le Teensy fait la moyenne de chaque sonar pendant 5 s et
+    l'enregistre en EEPROM. Consigne de vol = zero + hauteur de vol."""
+    mesurer_requested = Signal()
+    terminer_requested = Signal()
+
+    def __init__(self):
+        super().__init__()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 14, 22, 14)
+        root.setSpacing(8)
+
+        bar = QHBoxLayout()
+        titre = QLabel("Zéro des sonars")
+        titre.setObjectName("title")
+        bar.addWidget(titre)
+        bar.addStretch()
+        fin = QPushButton("Terminer")
+        fin.setObjectName("ghost")
+        fin.setFixedSize(150, 52)
+        fin.clicked.connect(self.terminer_requested.emit)
+        bar.addWidget(fin)
+        root.addLayout(bar)
+
+        hint = QLabel("Bateau à l'eau, au repos, switch ON coupé. Mesurer : moyenne "
+                      "de 5 s de chaque sonar, enregistrée dans le Teensy.")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        root.addWidget(hint)
+
+        cartes = QHBoxLayout()
+        cartes.setSpacing(8)
+        self._cartes = []
+        for nom in cfg.SONAR_NOMS:
+            f = QFrame()
+            f.setObjectName("card")
+            lay = QVBoxLayout(f)
+            lay.setContentsMargins(12, 6, 12, 8)
+            lay.setSpacing(2)
+            lab = QLabel(nom.capitalize()); lab.setObjectName("cardLabel")
+            dist = QLabel("--");            dist.setObjectName("multiValue")
+            zero = QLabel("zéro : --");     zero.setObjectName("smallValue")
+            haut = QLabel("hauteur : --");  haut.setObjectName("hint")
+            vol = QLabel("vol : --");       vol.setObjectName("hint")
+            res = QLabel("")
+            for w in (lab, dist, zero, haut, vol, res):
+                lay.addWidget(w)
+            set_status_style(res, None)
+            cartes.addWidget(f, 1)
+            self._cartes.append((dist, zero, haut, vol, res))
+        root.addLayout(cartes, 1)
+
+        self._go = QPushButton("Mesurer le zéro (5 s)")
+        self._go.setObjectName("primary")
+        self._go.clicked.connect(self.mesurer_requested.emit)
+        root.addWidget(self._go)
+
+        self._etat = QLabel("")
+        self._etat.setAlignment(CENTER)
+        self._etat.setWordWrap(True)
+        set_status_style(self._etat, None)
+        root.addWidget(self._etat)
+
+    def ouvrir(self):
+        for dist, zero, haut, vol, res in self._cartes:
+            dist.setText("--"); zero.setText("zéro : --"); haut.setText("hauteur : --")
+            vol.setText("vol : --"); res.setText(""); set_status_style(res, None)
+        self._go.setEnabled(True)
+        self._go.setText("Mesurer le zéro (5 s)")
+        self._etat.setText("En attente du Teensy...")
+        set_status_style(self._etat, None)
+
+    def update_data(self, d: dict):
+        for i, (dist, zero, haut, vol, res) in enumerate(self._cartes):
+            dist.setText(cfg.sonar_distance_text(d, i))
+            zero.setText(cfg.sonar_zero_text(d, i))
+            haut.setText(cfg.sonar_hauteur_text(d, i))
+            vol.setText(cfg.sonar_vol_text(d, i))
+            t, ok = cfg.sonar_res_text(d, i)
+            res.setText(t)
+            set_status_style(res, ok)
+        en_cours = cfg.sonar_zero_actif(d)
+        self._go.setEnabled(not en_cours and "sz" in d)
+        self._go.setText("Mesure en cours..." if en_cours else "Mesurer le zéro (5 s)")
+        texte, ok = cfg.sonar_zero_message(d)
+        self._etat.setText(texte)
+        set_status_style(self._etat, ok)

@@ -210,9 +210,16 @@ class MultiCard(QFrame):
             lay.addLayout(col)
             self._values.append(val)
 
-    def set_values(self, texts):
-        for lab, t in zip(self._values, texts):
+    def set_values(self, texts, alertes=None):
+        """alertes : liste de booleens (True = valeur en rouge), optionnelle."""
+        alertes = alertes or [False] * len(texts)
+        for lab, t, a in zip(self._values, texts, alertes):
             lab.setText(t)
+            name = "multiValueAlert" if a else "multiValue"
+            if lab.objectName() != name:
+                lab.setObjectName(name)
+                lab.style().unpolish(lab)
+                lab.style().polish(lab)
 
 
 class ChargeCard(QFrame):

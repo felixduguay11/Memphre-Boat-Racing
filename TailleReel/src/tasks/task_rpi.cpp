@@ -6,7 +6,17 @@
 //  hot, esc[]) → l'UI (Real_V1_UI) et l'outil d'analyse marchent
 //  sans modification. Champs ajoutés (objets imbriqués, aplatis
 //  par json_graph_ui.py en « imu.roll », « wd.pil.ok », ...) :
-//    arme, cmode, bat_cap (1 = plafond batterie basse actif), th{}, b12{}, cr{}, pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, wd{}
+//    arme, cmode, bat_cap (1 = plafond batterie basse actif), th{}, b12{}, cr{}, pil{}, can{}, imu{}, gps{}, son{}, sio{}, foils{}, sv{}, wd{}
+//  sv{} = servos (toujours envoyé) : c (servo en calibration, -1 aucun),
+//    us (sa position, µs), r (dernier résultat, ServoCalRes), k (dernière
+//    valeur enregistrée : 0 min, 1 neutre, 2 max), cal = [[min, neutre,
+//    max, valide] × 3] en µs (0 = pas enregistré), ordre avant, arr.
+//    gauche, arr. droit. foils.cmd est en µs (0 = servo pas commandé).
+//  sz{} = zéro des sonars (toujours envoyé) : a (mesure en cours), t
+//    (secondes restantes), r (dernier résultat, SonarZeroRes), rs (résultat
+//    de chaque sonar), ok (zéro valide), z (zéros, cm), e (plus grand écart
+//    à la moyenne de la dernière mesure, cm), hv (hauteurs de vol, cm),
+//    em (écart max accepté, cm). Ordre : avant, arr. gauche, arr. droit.
 //  b12{} = batterie secondaire 4S : v (V), n (0 OK, 1 attention, 2 arrêt
 //    verrouillé, 3 mesure invalide), a / s (seuils attention / arrêt),
 //    d (secondes avant l'arrêt, 0 = aucun compte à rebours).
@@ -16,6 +26,10 @@
 //  cr{} = cruise control : m (0 off, 1 ERPM, 2 vitesse), t (durée de
 //    l'activation, ms), fin (raison de sortie / refus), erpm et kmh
 //    (cibles de config.h, affichées dans le pop-up de l'UI).
+//  fc{} = bouton Foils : dispo (FOILS_ACTIFS), arm (armé), ctl (CONTROLE),
+//    t (durée en CONTROLE, ms, figée à la sortie), fin (dernier événement,
+//    FOILS_FIN_* / FOILS_REFUS_*), v (vitesse d'entrée, km/h ; 0 = pas de
+//    condition de vitesse), m (modes actifs : bits 0 hauteur, 1 roll, 2 pitch).
 //  son{} / sio{} seulement si SONARS_ACTIFS, foils{} seulement si FOILS_ACTIFS
 //  (config.h). L'UI affiche « absent de la trame » sinon (page Foils).
 //  ⚠ "target" / "ramped" sont dans l'unité de MODE_COMMANDE
@@ -34,6 +48,7 @@
 #include "task_esc_data.h"
 #include "task_watchdog.h"
 #include "esc_params.h"
+#include "servos.h"
 
 // Mutex défini dans main.cpp
 extern SemaphoreHandle_t dataMutex;
@@ -95,6 +110,7 @@ static void ap(const char* fmt, ...)
 struct Snapshot {
     ControlMode mode;  RunMode run;  bool arme;
     uint8_t cruise;  uint32_t cruise_ms;  uint8_t cruise_fin;
+    bool foils_arme;  bool controle;  uint32_t controle_ms;  uint8_t foils_fin;
     int   target;  float ramped;
     PiloteData pil;
     EscData    esc[NB_VESC];
@@ -105,6 +121,7 @@ struct Snapshot {
     WdTache wd[NB_TACHES];  uint32_t err;  bool hot;  bool rst;
     uint8_t tn[NB_VESC][NB_TEMP];
     float b12_v;  uint8_t b12_n;  uint32_t b12_reste;
+    float zero[NB_CANAUX];  bool zero_ok;  SonarZeroEtat sz;
     float us[NB_TACHES];
 };
 
@@ -114,6 +131,8 @@ static void lireSnapshot(Snapshot &s)
     {
         s.mode   = SM_mode;       s.run = SM_run;   s.arme = SM_arme;
         s.cruise = SM_cruise;     s.cruise_ms = SM_cruise_ms;   s.cruise_fin = SM_cruise_fin;
+        s.foils_arme = SM_foils_arme;  s.controle = SM_controle;
+        s.controle_ms = SM_controle_ms;  s.foils_fin = SM_foils_fin;
         s.target = Prop_target;   s.ramped = Prop_ramped;
         s.pil    = Pilote_data;
         for (int k = 0; k < NB_VESC; k++) s.esc[k] = ESC_data[k];
@@ -130,6 +149,8 @@ static void lireSnapshot(Snapshot &s)
         for (int i = 0; i < NB_TACHES; i++) s.wd[i] = WD_taches[i];
         s.err = WD_erreurs;  s.hot = WD_surchauffe;  s.rst = WD_reset_wdt;
         s.b12_v = WD_batt_sec_v;  s.b12_n = WD_batt_sec_niv;  s.b12_reste = WD_batt_sec_reste_ms;
+        for (int i = 0; i < NB_CANAUX; i++) s.zero[i] = Sonar_zero[i];
+        s.zero_ok = Sonar_zero_ok;  s.sz = Sonar_zero_etat;
         for (int k = 0; k < NB_VESC; k++) {
             for (int c = 0; c < NB_TEMP; c++) s.tn[k][c] = WD_temp_niv[k][c];
         }
@@ -189,6 +210,13 @@ static void sendTelemetry()
        s.cruise, (unsigned long)s.cruise_ms, s.cruise_fin,
        (int)CRUISE_ERPM, (double)CRUISE_VITESSE_KMH);
 
+    // --- Bouton Foils (armement du contrôle des foils) ---
+    ap(",\"fc\":{\"dispo\":%d,\"arm\":%d,\"ctl\":%d,\"t\":%lu,\"fin\":%d,\"v\":%.1f,\"m\":%d}",
+       FOILS_ACTIFS ? 1 : 0, s.foils_arme ? 1 : 0, s.controle ? 1 : 0,
+       (unsigned long)s.controle_ms, s.foils_fin,
+       FOILS_CONDITION_VITESSE ? (double)SM_VITESSE_CONTROLE_KMH : 0.0,
+       (FOILS_HAUTEUR_ACTIF ? 1 : 0) | (FOILS_ROLL_ACTIF ? 2 : 0) | (FOILS_PITCH_ACTIF ? 4 : 0));
+
     // --- Pilote ---
     // brut : switchs avant anti-rebond (bits 0 ON, 1 F/R, 2 CTL, 3 START)
     ap(",\"pil\":{\"on\":%d,\"fr\":%d,\"ctl\":%d,\"esc\":%d,\"lev\":%d,\"raw\":%d,"
@@ -223,9 +251,31 @@ static void sendTelemetry()
     ap(",\"son\":{\"av\":%.1f,\"ag\":%.1f,\"ad\":%.1f}", fin(s.dist[0]), fin(s.dist[1]), fin(s.dist[2]));
     ap(",\"sio\":{\"av\":%d,\"ag\":%d,\"ad\":%d}", s.io[0] ? 1 : 0, s.io[1] ? 1 : 0, s.io[2] ? 1 : 0);
 #endif
+    // --- Sonars : zéro sur l'eau (UI) ---
+    ap(",\"sz\":{\"a\":%d,\"t\":%u,\"r\":%u,\"ok\":%d,\"em\":%.1f,\"rs\":[%u,%u,%u],"
+       "\"z\":[%.1f,%.1f,%.1f],\"e\":[%.1f,%.1f,%.1f],\"hv\":[%.0f,%.0f,%.0f]}",
+       s.sz.actif ? 1 : 0, (unsigned)((s.sz.reste_ms + 999) / 1000), (unsigned)s.sz.res,
+       s.zero_ok ? 1 : 0, (double)SONAR_ZERO_ECART_MAX_CM,
+       (unsigned)s.sz.res_s[0], (unsigned)s.sz.res_s[1], (unsigned)s.sz.res_s[2],
+       fin(s.zero[0]), fin(s.zero[1]), fin(s.zero[2]),
+       fin(s.sz.ecart[0]), fin(s.sz.ecart[1]), fin(s.sz.ecart[2]),
+       (double)H_VOL[0], (double)H_VOL[1], (double)H_VOL[2]);
+
+    // --- Servos : calibration (UI) et Min / Neutre / Max en service ---
+    {
+        ServoEtat sv = {};
+        ServoCalib_Etat(sv);
+        ap(",\"sv\":{\"c\":%d,\"us\":%u,\"r\":%u,\"k\":%u,\"cal\":[",
+           sv.actif, (unsigned)sv.us, (unsigned)sv.res, (unsigned)sv.derniere);
+        for (int i = 0; i < NB_CANAUX; i++)
+            ap("%s[%u,%u,%u,%d]", i ? "," : "", (unsigned)sv.cal[i][SV_MIN],
+               (unsigned)sv.cal[i][SV_NEUTRE], (unsigned)sv.cal[i][SV_MAX], sv.valide[i] ? 1 : 0);
+        ap("]}");
+    }
+
 #if FOILS_ACTIFS
-    // --- Foils : commande des servos (°), sorties PID hauteur / pitch / roll ---
-    ap(",\"foils\":{\"on\":%d,\"cmd\":{\"av\":%.1f,\"ag\":%.1f,\"ad\":%.1f},"
+    // --- Foils : commande des servos (µs), sorties PID hauteur / pitch / roll ---
+    ap(",\"foils\":{\"on\":%d,\"cmd\":{\"av\":%.0f,\"ag\":%.0f,\"ad\":%.0f},"
        "\"h\":{\"av\":%.2f,\"ag\":%.2f,\"ad\":%.2f},\"p\":%.2f,\"r\":%.2f}",
        (xEventGroupGetBits(egEtat) & EVT_CONTROLE) ? 1 : 0,    // actifs aussi en CRUISE
        fin(s.cmd[0]), fin(s.cmd[1]), fin(s.cmd[2]),
@@ -253,12 +303,33 @@ static void sendHeartbeat()
     Serial.write((const uint8_t*)json, jlen);
 }
 
+// Switch ON (pilote) : les servos ne se calibrent que switch ON coupé
+static bool switchOn()
+{
+    bool on = true;                          // en cas de doute : refuser
+    if (xSemaphoreTake(dataMutex, portMAX_DELAY)) {
+        on = Pilote_data.switch_on;
+        xSemaphoreGive(dataMutex);
+    }
+    return on;
+}
+
 // Parsing volontairement minimal : on cherche la valeur de "cmd" (Real_V1).
 static void handlePiCommand(const char* line)
 {
     const char* p = strstr(line, "\"cmd\"");
     if (!p) return;
 
+    // Zéro des sonars sur l'eau (switch ON coupé) → Task_LectureSonar
+    if (strstr(p, "sonar_zero")) {
+        SonarZero_Demander(switchOn());
+        return;
+    }
+    // Calibration des servos (testée AVANT "calib" : "servo_calib" le contient)
+    if (strstr(p, "servo_")) {
+        ServoCalib_Commande(line, switchOn());
+        return;
+    }
     // Batterie basse (BMS lu par le Pi) → plafond de consigne
     if (strstr(p, "batt_basse")) {
         xEventGroupSetBits(egEtat, EVT_BATT_BASSE);
@@ -288,6 +359,9 @@ static void handlePiCommand(const char* line)
         else if (strstr(p, "cruise_vitesse")) xEventGroupSetBits(egEtat, EVT_CRUISE_VIT);
         else if (strstr(p, "cruise_off"))     xEventGroupSetBits(egEtat, EVT_CRUISE_OFF);
     }
+    // Bouton Foils de l'UI → machine d'état (EVT_FOILS_*)
+    else if (strstr(p, "foils_on"))  { xEventGroupSetBits(egEtat, EVT_FOILS_ON); }
+    else if (strstr(p, "foils_off")) { xEventGroupSetBits(egEtat, EVT_FOILS_OFF); }
     else if (strstr(p, "start")) {
         streaming = true;
         // Les gains PID arriveront ici plus tard (clé "pid").
@@ -296,8 +370,9 @@ static void handlePiCommand(const char* line)
         streaming  = false;
         lastBeatMs = millis();
         // NOTE : "stop" arrête seulement la télémétrie, pas les moteurs.
-        // Exception : l'écran n'affiche plus rien → sortie du cruise.
-        xEventGroupSetBits(egEtat, EVT_CRUISE_OFF);
+        // Exception : l'écran n'affiche plus rien → sortie du cruise
+        // et désarmement du bouton Foils.
+        xEventGroupSetBits(egEtat, EVT_CRUISE_OFF | EVT_FOILS_OFF);
     }
 }
 
@@ -337,6 +412,7 @@ void Task_RPi(void *ptr)
 
     // Commandes du Pi — non bloquant
     readPiCommands();
+    ServoCalib_Tick(switchOn());             // calibration des servos : fin si ON / UI muette
 
     // Sortie vers le Pi
     if (streaming) {

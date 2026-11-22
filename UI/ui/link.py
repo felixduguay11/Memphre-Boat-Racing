@@ -175,6 +175,8 @@ class SimLink(BaseLink):
         self._cal, self._cmin, self._cmax, self._cres = False, 1023, 0, 0
         # Cruise control : mode, debut, duree (ms), raison de sortie, signe de vie
         self._cr, self._cr_t0, self._cr_t, self._cr_fin, self._cr_vie = 0, 0.0, 0, 0, 0.0
+        # Bouton Foils (comme la machine d'etat) : arme, CONTROLE, duree, dernier evenement
+        self._fc_arm, self._fc_ctl, self._fc_t0, self._fc_t, self._fc_fin = False, False, 0.0, 0, 0
         self._cr_cons = 0.0         # consigne du cruise (rampe / boucle vitesse)
         self._arme = True           # levier arme (False : consigne 0 jusqu'au repos)
         self._t_sortie = 0.0        # instant de la sortie du cruise
@@ -182,6 +184,13 @@ class SimLink(BaseLink):
         self._tn = {}               # (index ESC, capteur) -> niveau de temperature
         self._b12_att, self._b12_bas, self._b12_arret = False, None, False
         self._cap = False                 # plafond batterie basse (comme le Teensy)
+        # Calibration des servos (comme servos.cpp) : [min, neutre, max] en µs, 0 = pas enregistre
+        self._sv_cal = [[0, 0, 0] for _ in range(3)]
+        self._sv_c, self._sv_us, self._sv_r, self._sv_k, self._sv_vie = -1, 1500, 0, 1, 0.0
+        # Zero des sonars (comme task_sonar.cpp)
+        self._sz_z, self._sz_ok = [0.0, 0.0, 0.0], False
+        self._sz_t0, self._sz_r, self._sz_rs, self._sz_e = None, 0, [0, 0, 0], [0.0, 0.0, 0.0]
+        self._sz_mes = []                 # [(distances, io)] pendant la mesure
         self._timer = QTimer(self)
         self._timer.setInterval(period_ms)
         self._timer.timeout.connect(self._tick)
@@ -205,12 +214,32 @@ class SimLink(BaseLink):
             self._active = cmd == "start"
             if cmd == "stop":
                 self._cruise_fin(1)
+                if self._fc_arm:
+                    self._fc_arm, self._fc_fin = False, 1
+        elif cmd == "foils_on":
+            if self._b12_arret:
+                self._fc_fin = 4                # refuse : pas en RUN
+            else:
+                self._fc_arm, self._fc_fin = True, 0
+        elif cmd == "foils_off":
+            if self._fc_arm:
+                self._fc_arm, self._fc_fin = False, 1
         elif cmd == "calib":
             self._cal, self._cmin, self._cmax, self._cres = True, 1023, 0, 0
         elif cmd == "calib_fin" and self._cal:
             self._cal, self._cres = False, 1
         elif cmd == "calib_annule" and self._cal:
             self._cal, self._cres = False, 4
+        elif cmd == "sonar_zero":
+            if self.SIM_SWITCH_ON:
+                self._sz_r = 2
+            elif self._sz_t0 is None:
+                self._sz_t0, self._sz_mes, self._sz_r = time.monotonic(), [], 0
+                self._sz_rs, self._sz_e = [0, 0, 0], [0.0, 0.0, 0.0]
+        elif isinstance(cmd, str) and cmd.startswith("servo_"):
+            self._servo_cmd(obj)
+            if cmd in ("servo_vie", "servo_pas"):
+                return                          # frequents : pas de message
         elif cmd == "escconf":
             QTimer.singleShot(100, self._emit_escconf)
         elif cmd in ("batt_basse", "batt_ok"):
@@ -245,6 +274,92 @@ class SimLink(BaseLink):
         if n == 0 and t >= self.SIM_T_ATTENTION:
             n = 1
         return n
+
+    # ------------------------------------------------------------ servos (simulation)
+    SIM_SWITCH_ON = False       # pour les essais : refuse / arrete la calibration
+
+    @staticmethod
+    def _sv_valide(c) -> bool:
+        return 900 <= c[0] < c[1] < c[2] <= 2100
+
+    def _servo_cmd(self, obj: dict):
+        cmd = obj.get("cmd")
+        if cmd == "servo_calib":
+            s = int(obj.get("s", -1))
+            if not 0 <= s < 3:
+                return
+            if self.SIM_SWITCH_ON:
+                self._sv_c, self._sv_r = -1, 2
+                return
+            self._sv_c, self._sv_r = s, 0
+            self._sv_us = self._sv_cal[s][1] or 1500
+            self._sv_vie = time.monotonic()
+            return
+        if self._sv_c < 0:
+            return
+        self._sv_vie = time.monotonic()
+        if cmd == "servo_pas":
+            d = max(-50, min(50, int(obj.get("d", 0))))
+            self._sv_us = max(900, min(2100, self._sv_us + d))
+        elif cmd == "servo_enr":
+            k = {"min": 0, "neutre": 1, "max": 2}.get(obj.get("k"))
+            if k is not None:
+                self._sv_cal[self._sv_c][k] = self._sv_us
+                self._sv_r, self._sv_k = 1, k
+        elif cmd == "servo_fin":
+            self._sv_c, self._sv_r = -1, 3
+
+    # ------------------------------------------------------------ sonars (simulation)
+    SIM_SONAR_REPOS = (52.0, 55.0, 58.0)    # cm, bateau au repos
+    SIM_SONAR_VAGUES = 1.0                  # cm d'amplitude au repos (essais : > 6 -> refus)
+    SIM_SONAR_ECART_MAX = 6.0               # SONAR_ZERO_ECART_MAX_CM
+    SIM_SONAR_DUREE_S = 5.0                 # SONAR_ZERO_DUREE_MS
+    SIM_H_VOL = (40.0, 40.0, 40.0)          # H_VOL_x_CM
+    SIM_FOILS_KMH = 12.0                    # SM_VITESSE_CONTROLE_KMH (FOILS_CONDITION_VITESSE)
+    SIM_SONAR_MAX = 220.0                   # SONAR_DIST_MAX_CM
+
+    def _sz_trame(self, son: dict, sio: dict) -> dict:
+        reste = 0
+        if self._sz_t0 is not None:
+            if self.SIM_SWITCH_ON:
+                self._sz_t0, self._sz_r = None, 3
+            else:
+                self._sz_mes.append(([son[k] for k in ("av", "ag", "ad")], [sio[k] for k in ("av", "ag", "ad")]))
+                ecoule = time.monotonic() - self._sz_t0
+                reste = math.ceil(self.SIM_SONAR_DUREE_S - ecoule)
+                if ecoule >= self.SIM_SONAR_DUREE_S:
+                    self._sz_t0, reste, z, rs = None, 0, [], []
+                    for i in range(3):
+                        v = [m[0][i] for m in self._sz_mes]
+                        moy = sum(v) / len(v)
+                        e = max(max(v) - moy, moy - min(v))
+                        self._sz_e[i] = round(e, 1)
+                        if not all(m[1][i] for m in self._sz_mes):
+                            rs.append(4)
+                        elif e > self.SIM_SONAR_ECART_MAX:
+                            rs.append(5)
+                        elif not 20.5 < moy < self.SIM_SONAR_MAX - 0.5 or moy + self.SIM_H_VOL[i] > self.SIM_SONAR_MAX:
+                            rs.append(6)
+                        else:
+                            rs.append(1)
+                        z.append(round(moy, 1))
+                    self._sz_rs = rs
+                    mauvais = [r for r in rs if r != 1]
+                    self._sz_r = min(mauvais) if mauvais else 1
+                    if not mauvais:
+                        self._sz_z, self._sz_ok = z, True
+        return {"a": int(self._sz_t0 is not None), "t": max(0, reste), "r": self._sz_r,
+                "ok": int(self._sz_ok), "em": self.SIM_SONAR_ECART_MAX, "rs": self._sz_rs,
+                "z": self._sz_z, "e": self._sz_e, "hv": list(self.SIM_H_VOL)}
+
+    def _sv_trame(self) -> dict:
+        if self._sv_c >= 0:
+            if self.SIM_SWITCH_ON:
+                self._sv_c, self._sv_r = -1, 4
+            elif time.monotonic() - self._sv_vie > 1.0:
+                self._sv_c, self._sv_r = -1, 5
+        return {"c": self._sv_c, "us": self._sv_us, "r": self._sv_r, "k": self._sv_k,
+                "cal": [c + [int(self._sv_valide(c))] for c in self._sv_cal]}
 
     def _batt12(self) -> dict:
         """Comme BattSecMaj() du watchdog (sans la moyenne) : attention avec
@@ -392,14 +507,32 @@ class SimLink(BaseLink):
                "lmin": 300, "lmax": 700, "cmin": self._cmin if self._cal else 0,
                "cmax": self._cmax if self._cal else 0}
         # Sonars + foils (blocs envoyes si SONARS_ACTIFS / FOILS_ACTIFS) :
-        # CONTROLE une periode sur deux, sonar avant non valide de temps en temps
-        ctl = (n // 200) % 2 == 1
+        # CONTROLE si le bouton Foils est arme et vitesse >= SIM_FOILS_KMH
+        # (avec 1 km/h d'hysteresis), sonar avant non valide de temps en temps
+        seuil = self.SIM_FOILS_KMH - (1.0 if self._fc_ctl else 0.0)
+        ctl = self._fc_arm and self._arme and not self._b12_arret and v >= seuil
+        if ctl and not self._fc_ctl:
+            self._fc_t0 = time.monotonic()
+        if ctl:
+            self._fc_t = int((time.monotonic() - self._fc_t0) * 1000)
+        self._fc_ctl = ctl
+        fc = {"dispo": 1, "arm": int(self._fc_arm), "ctl": int(ctl), "t": self._fc_t,
+              "fin": self._fc_fin, "v": self.SIM_FOILS_KMH, "m": 3}
         son, sio, cmd, h = {}, {}, {}, {}
         for k, (key, ph) in enumerate((("av", 0.0), ("ag", 1.3), ("ad", 2.6))):
-            son[key] = round(70.0 + 18.0 * math.sin(n / 22.0 + ph), 1)
-            sio[key] = 0 if key == "av" and n % 150 > 135 else 1
-            h[key] = round((70.0 - son[key]) * 0.4, 2) if ctl else 0.0
-            cmd[key] = round(min(163.0, max(120.0, 148.0 + h[key] * 1.5)), 1)
+            repos = self.SIM_SONAR_REPOS[k]
+            if ctl:                             # en vol : zero + hauteur, avec des vagues
+                ref = repos + self.SIM_H_VOL[k]
+                son[key] = round(ref + 6.0 * math.sin(n / 22.0 + ph), 1)
+                sio[key] = 0 if key == "av" and n % 150 > 135 else 1
+                h[key] = round((ref - son[key]) * 0.4, 2)
+            else:                               # au repos sur l'eau
+                ref = repos
+                son[key] = round(repos + self.SIM_SONAR_VAGUES * math.sin(n / 9.0 + ph), 1)
+                sio[key] = 1
+                h[key] = 0.0
+            c = self._sv_cal[k]                 # commande en µs (0 = servo pas calibre)
+            cmd[key] = round(min(c[2], max(c[0], c[1] + h[key] * 10.0))) if self._sv_valide(c) else 0
         p_out = round(math.sin(n / 30.0) * 2.0, 2) if ctl else 0.0
         r_out = round(math.sin(n / 18.0) * 3.0, 2) if ctl else 0.0
         foils = {"on": int(ctl), "cmd": cmd, "h": h, "p": p_out, "r": r_out}
@@ -416,10 +549,11 @@ class SimLink(BaseLink):
             run = "CONTROLE" if ctl else "FORWARD"
         self.telemetry.emit({"t": n * self._timer.interval(),
                              "mode": "ARRET" if self._b12_arret else "RUN", "b12": b12,
+                             "sv": self._sv_trame(), "sz": self._sz_trame(son, sio),
                              "run": run, "arme": int(self._arme),
                              "son": son, "sio": sio, "foils": foils, "target": self._target,
                              "ramped": int(erpm), "esc": escs, "cmode": "ERPM",
-                             "bat_cap": int(self._cap), "cr": cr, "th": th,
+                             "bat_cap": int(self._cap), "cr": cr, "fc": fc, "th": th,
                              "hot": int(self._surchauffe()),
                              "imu": imu, "gps": gps, "pil": pil})
 

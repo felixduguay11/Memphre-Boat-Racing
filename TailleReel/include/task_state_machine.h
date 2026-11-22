@@ -58,6 +58,16 @@
 #define CRUISE_REFUS_ETAT    8     // demande refusée : pas en RUN·FORWARD
 #define CRUISE_REFUS_GPS     9     // demande refusée : vitesse GPS invalide
 
+// ─── Bouton Foils de l'UI (armement du contrôle des foils) ───
+// Dernier événement (SM_foils_fin, télémétrie "fc.fin") — mêmes numéros
+// que FOILS_FINS de l'UI
+#define FOILS_FIN_AUCUNE     0
+#define FOILS_FIN_UI         1     // désarmé par le bouton Foils (ou Stop)
+#define FOILS_FIN_IDLE       2     // désarmé : switch ON à OFF
+#define FOILS_FIN_ARRET      3     // désarmé : erreur critique
+#define FOILS_REFUS_ETAT     4     // armement refusé : pas en RUN
+#define FOILS_REFUS_CONFIG   5     // armement refusé : FOILS_ACTIFS à 0
+
 // ─── Variables partagées (publiées par Task_StateMachine) ───
 extern ControlMode SM_mode;
 extern RunMode     SM_run;
@@ -67,6 +77,10 @@ extern float       SM_temps_us;
 extern uint8_t     SM_cruise;      // CRUISE_OFF / CRUISE_MODE_ERPM / CRUISE_MODE_VIT
 extern uint32_t    SM_cruise_ms;   // durée de l'activation (figée à la sortie, remise à 0 à l'entrée)
 extern uint8_t     SM_cruise_fin;  // CRUISE_FIN_* / CRUISE_REFUS_*
+extern bool        SM_foils_arme;  // bouton Foils confirmé
+extern bool        SM_controle;    // foils actifs (CONTROLE, aussi en CRUISE)
+extern uint32_t    SM_controle_ms; // durée en CONTROLE (figée à la sortie, remise à 0 à l'entrée)
+extern uint8_t     SM_foils_fin;   // FOILS_FIN_* / FOILS_REFUS_*
 
 // millis() du dernier signe de vie de l'UI (toute commande "cruise_*").
 // Écrit par Task_RPi, lu par la machine d'état (32 bits : atomique).

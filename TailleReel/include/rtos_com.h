@@ -11,6 +11,8 @@
 //   Task_RPi ──────────(egEtat : EVT_CALIB_*)─────► Pilote (calibration levier)
 //   Task_RPi ──────────(egEtat : EVT_CRUISE_*)────► StateMachine (cruise control)
 //   Task_RPi ──────────(egEtat : EVT_BATT_BASSE)──► Propulsion (plafond batterie)
+//   Task_RPi ──────────(egEtat : EVT_SONAR_ZERO)──► Sonar (zéro sur l'eau)
+//   Task_RPi ──────────(egEtat : EVT_FOILS_*)─────► StateMachine (bouton Foils)
 //   Tâches ───────────(Shared Data, dataMutex)────► RPi, Watchdog, FSM
 //
 //  qCmd est une « mailbox » : longueur 1, écrite par xQueueOverwrite()
@@ -94,6 +96,11 @@ struct FsmCmd {
 #define EVT_CRUISE_MASK    (EVT_CRUISE_ERPM | EVT_CRUISE_VIT | EVT_CRUISE_OFF)
 // Écrit par Task_RPi ({"cmd":"batt_basse"} / {"cmd":"batt_ok"}), lu par Task_Propulsion
 #define EVT_BATT_BASSE     (1UL << 22)  // → consigne plafonnée à ±CMD_MAX_BATT_*
+// Écrit par Task_RPi ({"cmd":"sonar_zero"}), lu et effacé par Task_LectureSonar
+#define EVT_FOILS_ON       (1UL << 13)  // {"cmd":"foils_on"} : armer le contrôle des foils
+#define EVT_FOILS_OFF      (1UL << 14)  // {"cmd":"foils_off"} (ou {"cmd":"stop"}) : désarmer
+#define EVT_FOILS_MASK     (EVT_FOILS_ON | EVT_FOILS_OFF)
+#define EVT_SONAR_ZERO     (1UL << 12)  // → mesure du zéro des sonars (SONAR_ZERO_DUREE_MS)
 
 // ─── Objets FreeRTOS (définis dans main.cpp) ───
 extern SemaphoreHandle_t  dataMutex;
