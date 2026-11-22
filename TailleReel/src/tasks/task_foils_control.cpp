@@ -14,6 +14,7 @@ float HPR_cmd_servos[NB_CANAUX] = {0.0f, 0.0f, 0.0f};
 float HPR_control_time_us       =  0.0f;
 float cmd_filt[NB_CANAUX]       = {SERVO_US_CENTRE, SERVO_US_CENTRE, SERVO_US_CENTRE};   // µs
 float H_prev_dist[NB_CANAUX]    = {0.0f, 0.0f, 0.0f};
+float distance_ref[NB_CANAUX]   = {SONAR_DISTANCE_REF_AVANT, SONAR_DISTANCE_REF_ARRIERE_GAUCHE, SONAR_DISTANCE_REF_ARRIERE_DROIT};
 float H_integral[NB_CANAUX]     = {0.0f, 0.0f, 0.0f};
 float H_deriv[NB_CANAUX]        = {0.0f, 0.0f, 0.0f};
 float P_prev_pitch              = 0.0f;
@@ -39,7 +40,9 @@ static float pid_hauteur(int i, float dist, float dt)
     float absE  = fabs_local(error);
     if (absE < H_DEADBAND_ERR) error = 0.0f;
 
-    H_integral[i] += error * dt;
+    // Pas d'intégration au-dessus de H_GRANDE_ERREUR (décollage) : sinon
+    // l'intégrale se remplit pendant la montée et fait dépasser la consigne.
+    if (absE < H_GRANDE_ERREUR) H_integral[i] += error * dt;
     H_integral[i]  = fclamp(H_integral[i], H_INTEGRAL_MIN, H_INTEGRAL_MAX);
 
     float delta = dist - H_prev_dist[i];
@@ -144,6 +147,8 @@ void Task_foils_Control(void *ptr)
         {
             for (int i = 0; i < NB_CANAUX; i++) {
                 dist[i] = Sonar_distance[i];
+                // Consigne = zéro sur l'eau + hauteur de vol (sans zéro : CONTROLE refusé)
+                if (Sonar_zero_ok) distance_ref[i] = Sonar_zero[i] + H_VOL[i];
             }
             pitch_deg = Xsens_data.pitch;
             roll_deg  = Xsens_data.roll;
@@ -151,25 +156,38 @@ void Task_foils_Control(void *ptr)
             xSemaphoreGive(dataMutex);
         }
 
-        // Hauteur 
+        // Hauteur (FOILS_HAUTEUR_ACTIF à 0 : sortie et intégrale à 0)
         for (int i = 0; i < NB_CANAUX; i++) {
-            hauteur_out[i] = pid_hauteur(i, dist[i], dt);
+            if (FOILS_HAUTEUR_ACTIF) {
+                hauteur_out[i] = pid_hauteur(i, dist[i], dt);
+            } else {
+                hauteur_out[i] = 0.0f;
+                H_integral[i]  = 0.0f;
+                H_prev_dist[i] = dist[i];
+            }
         }
 
-        // Pitch et Roll
-        if(xsens_ok == true){
+        // Pitch et Roll (FOILS_PITCH_ACTIF / FOILS_ROLL_ACTIF à 0 : idem)
+        if (FOILS_PITCH_ACTIF && xsens_ok) {
             pitch_out = pid_pitch(pitch_deg, dt);
-            roll_out = pid_roll (roll_deg,  dt);
+        } else {
+            pitch_out    = 0.0f;
+            P_integral   = 0.0f;
+            P_prev_pitch = pitch_deg;
         }
-        else {
-            pitch_out = 0.0f;
-            roll_out = 0.0f;
+        if (FOILS_ROLL_ACTIF && xsens_ok) {
+            roll_out = pid_roll(roll_deg, dt);
+        } else {
+            roll_out    = 0.0f;
+            R_integral  = 0.0f;
+            R_prev_roll = roll_deg;
         }
 
         // Sorties des PID en degrés servo → µs autour du neutre calibré
-        servo_raw[0] = s_neu[0] + (hauteur_out[0] + pitch_out)            * SERVO_US_PAR_DEG;   // avant
-        servo_raw[1] = s_neu[1] + (hauteur_out[1] - pitch_out - roll_out) * SERVO_US_PAR_DEG;   // arr. gauche
-        servo_raw[2] = s_neu[2] + (hauteur_out[2] - pitch_out + roll_out) * SERVO_US_PAR_DEG;   // arr. droit
+        // SERVO_SENS_x : -1 pour un servo monté à l'envers (config.h)
+        servo_raw[0] = s_neu[0] + SERVO_SENS_AVANT          * (hauteur_out[0] + pitch_out)            * SERVO_US_PAR_DEG;   // avant
+        servo_raw[1] = s_neu[1] + SERVO_SENS_ARRIERE_GAUCHE * (hauteur_out[1] - pitch_out - roll_out) * SERVO_US_PAR_DEG;   // arr. gauche
+        servo_raw[2] = s_neu[2] + SERVO_SENS_ARRIERE_DROIT  * (hauteur_out[2] - pitch_out + roll_out) * SERVO_US_PAR_DEG;   // arr. droit
 
         // AJOUT : PID appliqué uniquement en CONTROLE (machine d'état).
         // Sinon : neutre + intégrateurs à zéro (pas de windup, réentrée
@@ -218,4 +236,4 @@ void Task_foils_Control(void *ptr)
         wd_vivant(T_FOILS);
         vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(PERIODE_height_control_MS));
     }
-}
+}

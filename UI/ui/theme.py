@@ -120,6 +120,15 @@ QPushButton#cruise   {{ font-size:22px; border-radius:10px; border:2px solid {ac
 QPushButton#cruiseOn {{ font-size:22px; font-weight:600; border-radius:10px; border:2px solid {ok_fg};
                         background:{ok_bg}; color:{ok_fg}; min-height:54px; }}
 QPushButton#cruise:disabled {{ color:{line}; border-color:{line}; background:transparent; }}
+QPushButton#foils    {{ font-size:22px; border-radius:10px; border:2px solid {accent};
+                        background:{accent_bg}; color:{accent_fg}; min-height:54px; }}
+QPushButton#foilsArme {{ font-size:22px; font-weight:600; border-radius:10px; border:2px solid {warn};
+                        background:transparent; color:{warn}; min-height:54px; }}
+QPushButton#foilsOn  {{ font-size:22px; font-weight:600; border-radius:10px; border:2px solid {ok_fg};
+                        background:{ok_bg}; color:{ok_fg}; min-height:54px; }}
+QPushButton#foils:disabled {{ color:{line}; border-color:{line}; background:transparent; }}
+QLabel#foilsAngle {{ font-size:46px; font-weight:600; }}
+QLabel#foilsPopupTexte {{ font-size:22px; color:{text}; }}
 QLabel#cruiseTimer   {{ font-size:30px; font-weight:600; color:{muted}; }}
 QLabel#cruiseTimerOn {{ font-size:30px; font-weight:600; color:{ok_fg}; }}
 QLabel#cruiseInfo    {{ font-size:15px; color:{muted}; }}

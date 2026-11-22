@@ -71,11 +71,16 @@
 //-------------- SONARS --------------//
 #define SONAR_VREF          3.3f
 #define SONAR_ADC_BITS      1023.0f   // ADC 10 bits (voir ADC_RESOLUTION)
-#define SONAR_RESISTANCE    150.0f
+// Résistance de mesure de chaque sonar (Ω), nominal 150 Ω. Mettre la
+// valeur EFFECTIVE calculée par test_sonars (planche à 2 distances au
+// ruban) : elle compense aussi l'erreur de référence de l'ADC.
+#define SONAR_R_AVANT           147.3f
+#define SONAR_R_ARRIERE_GAUCHE  146.7f
+#define SONAR_R_ARRIERE_DROIT   147.2f
 #define SONAR_I_MIN_MA      4.0f
 #define SONAR_I_MAX_MA      20.0f
 #define SONAR_DIST_MIN_CM   20.0f
-#define SONAR_DIST_MAX_CM   200.0f
+#define SONAR_DIST_MAX_CM   220.0f
 #define SONAR_ALPHA         0.2f
 #define SONAR_DISTANCE_REF_AVANT            70.0f
 #define SONAR_DISTANCE_REF_ARRIERE_GAUCHE   70.0f
@@ -83,6 +88,15 @@
 #define SONAR_INIT_DISTANCE 0.0f
 #define SONAR_INIT_TIME     0.0f
 #define SONAR_IO_VALIDE     1         // niveau de la sortie TOR (PNP) quand le sonar est valide
+// Zéro sur l'eau (UI : Calibration → Sonars) : bateau au repos, switch
+// ON coupé ; distance moyenne de chaque sonar pendant SONAR_ZERO_DUREE_MS,
+// sauvée en EEPROM. Refusé (ancien zéro gardé) si la sortie TOR d'un
+// sonar dit « non valide » pendant la mesure, si une lecture s'écarte
+// de la moyenne de plus de SONAR_ZERO_ECART_MAX_CM (vagues, bateau qui
+// bouge), ou si zéro + hauteur de vol dépasse SONAR_DIST_MAX_CM.
+#define SONAR_ZERO_DUREE_MS     5000
+#define SONAR_ZERO_ECART_MAX_CM 6.0f      // ± autour de la moyenne
+#define SONAR_ZERO_EEPROM_ADDR  96        // levier à 0, servos à 64
 //------------------------------------//
 
 
@@ -104,24 +118,50 @@
 #define SERVO_CALIB_EEPROM_ADDR  64       // levier à l'adresse 0
 #define SERVO_CALIB_PAS_MAX      50       // µs : plus grand pas accepté par commande
 #define SERVO_CALIB_VIE_MS       1000     // sans signe de vie de l'UI → fin de la calibration
+
+#define SERVO_SENS_AVANT          -1
+#define SERVO_SENS_ARRIERE_GAUCHE 1
+#define SERVO_SENS_ARRIERE_DROIT  -1
 //------------------------------------//
 
 
+//-------------- XSENS --------------//
+// Convention attendue par le contrôle des foils :
+//   tangage > 0 = nez en HAUT, roulis > 0 = côté DROIT en HAUT.
+// Le MTi est tourné de 180° autour de Z (il pointe vers l'arrière) : avec
+// les angles d'Euler ENU (MT Manager par défaut), ses angles bruts ont déjà
+// cette convention → +1. Vérifier à terre (page Xsens) : lever l'avant →
+// tangage positif ; lever le côté droit → roulis positif. Sinon mettre -1.
+#define XSENS_SENS_PITCH         1
+#define XSENS_SENS_ROLL          1
+//------------------------------------//
+
+//------ MODES DE CONTRÔLE (CONTROLE) ------//
+// 0 = sortie de ce PID à 0 (et son intégrale remise à 0).
+#define FOILS_HAUTEUR_ACTIF      1
+#define FOILS_ROLL_ACTIF         1
+#define FOILS_PITCH_ACTIF        0      // désactivé pour les premiers essais
+//------------------------------------//
+
 //--------- HAUTEUR CONTROLE ---------//
-#define H_DISTANCE_REF_AVANT            70.0f
-#define H_DISTANCE_REF_ARRIERE_GAUCHE   70.0f
-#define H_DISTANCE_REF_ARRIERE_DROIT    70.0f
+// Hauteur de vol de chaque sonar AU-DESSUS DE SON ZÉRO (mesuré sur l'eau) :
+// consigne de distance = zéro + H_VOL_x_CM. CONTROLE refusé sans zéro valide.
+#define H_VOL_AVANT_CM              40.0f
+#define H_VOL_ARRIERE_GAUCHE_CM     40.0f
+#define H_VOL_ARRIERE_DROIT_CM      40.0f
 
 #define H_DEADBAND_ERR          1.0f
 #define H_DEADBAND_DERIV        0.3f
-#define H_INTEGRAL_MAX          20.0f
-#define H_INTEGRAL_MIN          -20.0f
+#define H_INTEGRAL_MAX          60.0f    // cm·s (20 → 60 le 22/11 : hauteur indépendante de la vitesse)
+#define H_INTEGRAL_MIN          -60.0f
 
-// Grande Erreur
+// Grande Erreur (au-dessus : pas d'intégration, voir pid_hauteur)
+// KP 1.6 → 0.6 et KD 1.9 → 0.4 le 22/11 : servos qui claquaient butée à
+// butée au décollage et saut de commande de 100 µs à 10 cm d'erreur.
 #define H_GRANDE_ERREUR         10.0f
-#define H_KP_HAUT               1.6f
+#define H_KP_HAUT               0.6f
 #define H_KI_HAUT               0.0f
-#define H_KD_HAUT               1.9f
+#define H_KD_HAUT               0.4f
 
 // Moyenne Erreur
 #define H_MOYENNE_ERREUR        5.0f
@@ -439,10 +479,16 @@
 //--------- MACHINE D'ETAT -----------//
 // Logique IDLE / RUN (NEUTRAL, FORWARD, REVERSE) = Real_V1.
 // Ajouts : ARRET (erreur critique du watchdog) et CONTROLE.
-// FORWARD → CONTROLE si : FOILS_ACTIFS, switch Relay_Control actif,
-//   I/O des sonars valides, vitesse GPS >= SM_VITESSE_CONTROLE_KMH.
+// FORWARD (ou CRUISE) → CONTROLE si : FOILS_ACTIFS, bouton Foils de l'UI
+//   confirmé (armé), servos calibrés, Xsens sans défaut, sonars valides et
+//   zéro fait (si FOILS_HAUTEUR_ACTIF), et vitesse GPS >=
+//   SM_VITESSE_CONTROLE_KMH (si FOILS_CONDITION_VITESSE).
 // CONTROLE → FORWARD si une condition tombe, ou vitesse
 //   < SM_VITESSE_CONTROLE_KMH - SM_VITESSE_HYST_KMH.
+// Armé : {"cmd":"foils_on"} (pop-up confirmé). Désarmé : {"cmd":"foils_off"}
+//   (2e appui), Stop de l'UI, switch ON coupé (IDLE), ARRET. Armé, on
+//   revient seul en CONTROLE quand les conditions sont de nouveau là.
+#define FOILS_CONDITION_VITESSE  1      // 0 = pas de condition de vitesse : le bouton suffit
 #define SM_VITESSE_CONTROLE_KMH  12.0f
 #define SM_VITESSE_HYST_KMH      1.0f
 #define FSM_QUEUE_LEN            8
@@ -534,7 +580,7 @@
 #define Analog_Sonar_Arriere_Droit  14
 //#define PIN_17                      17
 //#define PIN_18                      18
-#define Relay_Control               19   // ENTRÉE : switch d'activation du contrôle des foils
+#define Relay_Control               19   // ENTRÉE : pas utilisé pour CONTROLE (bouton Foils de l'UI)
 #define TX_Xsens                    20
 #define RX_Xsens                    21
 #define TX_Batt_72V                 22

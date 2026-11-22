@@ -6,7 +6,8 @@
 #include "servos.h"     // sortie en µs, Min / Neutre / Max calibrés (EEPROM)
 
 // Paramètres PID Fuzzy
-const float distance_ref[NB_CANAUX] = {H_DISTANCE_REF_AVANT, H_DISTANCE_REF_ARRIERE_GAUCHE, H_DISTANCE_REF_ARRIERE_DROIT};
+// Consigne de distance de chaque sonar (cm) = zéro mesuré sur l'eau + H_VOL_x_CM
+extern float distance_ref[NB_CANAUX];
 extern float cmd_filt[NB_CANAUX];
 
 // Hauteur — un par foil
@@ -32,4 +33,4 @@ extern float HPR_cmd_servos[NB_CANAUX];   // µs envoyés (0 = servo pas command
 extern float HPR_control_time_us;       
 
 // Tâche FreeRTOS
-void Task_foils_Control(void *ptr);
+void Task_foils_Control(void *ptr);

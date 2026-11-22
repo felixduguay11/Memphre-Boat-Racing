@@ -52,6 +52,7 @@ void setup()
   ESC_InitCAN();                      // CAN3 250 kbps (Real_V1)
 
   Servos_Init();                      // PWM des servos (sans impulsion) + calibration EEPROM
+  Sonars_ChargerZero();               // zéro des sonars (EEPROM), même sans SONARS_ACTIFS
 
   xTaskCreate(Task_Watchdog,      "WD",     STACK_WD,     NULL, PRIO_WD,     &WD_handles[T_WD]);
   xTaskCreate(Task_StateMachine,  "FSM",    STACK_FSM,    NULL, PRIO_FSM,    &WD_handles[T_FSM]);

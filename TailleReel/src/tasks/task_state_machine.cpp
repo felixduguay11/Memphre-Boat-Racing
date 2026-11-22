@@ -20,10 +20,27 @@ float       SM_temps_us = 0.0f;
 uint8_t     SM_cruise     = CRUISE_OFF;
 uint32_t    SM_cruise_ms  = 0;
 uint8_t     SM_cruise_fin = CRUISE_FIN_AUCUNE;
+bool        SM_foils_arme  = false;
+bool        SM_controle    = false;
+uint32_t    SM_controle_ms = 0;
+uint8_t     SM_foils_fin   = FOILS_FIN_AUCUNE;
 volatile uint32_t Cruise_vie_ms = 0;
 
 // ─── État privé ───
 static bool levierArme = false;
+
+// ─── Bouton Foils de l'UI (état privé) ───
+static bool     foilsArme     = false;     // pop-up Foils confirmé
+static uint8_t  foilsFin      = FOILS_FIN_AUCUNE;
+static uint32_t controleDebutMs = 0;
+static uint32_t controleDureeMs = 0;       // durée en CONTROLE (figée à la sortie)
+
+static void FoilsDesarmer(uint8_t raison)
+{
+    if (!foilsArme) return;
+    foilsArme = false;
+    foilsFin  = raison;
+}
 
 // ─── Cruise control (état privé) ───
 static uint8_t  cruiseMode     = CRUISE_OFF;
@@ -89,21 +106,27 @@ static float CruiseVitesse(float consigne, float v_kmh, float erpm_reel, float d
 static const PiloteData PILOTE_SUR = {};   // tout à false / 0
 
 // FORWARD → CONTROLE (entrée) / CONTROLE → FORWARD (sortie, hystérésis)
-static bool ControleAutorise(bool deja_en_controle, const PiloteData &p,
+// (Le switch Relay_Control n'est plus une condition : bouton Foils de l'UI.)
+static bool ControleAutorise(bool deja_en_controle, bool arme,
                              bool v_ok, float v_kmh, bool sonars_ok,
                              EventBits_t bits)
 {
 #if FOILS_ACTIFS
-    if (!p.switch_ctl)              return false;   // switch Relay_Control
-    if (!sonars_ok)                 return false;   // I/O des sonars
-    if (!v_ok)                      return false;   // vitesse GPS valide
+    if (!arme)                      return false;   // bouton Foils de l'UI
+    if (FOILS_HAUTEUR_ACTIF && !sonars_ok) return false;   // I/O des sonars + zéro
     if (bits & EVT_ERR_CAPTEUR)     return false;   // Xsens/Sonar/Foils en défaut
     if (!Servos_TousValides())      return false;   // servos pas calibrés (UI → Calibration)
+#if FOILS_CONDITION_VITESSE
+    if (!v_ok)                      return false;   // vitesse GPS valide
     float seuil = deja_en_controle ? (SM_VITESSE_CONTROLE_KMH - SM_VITESSE_HYST_KMH)
                                    :  SM_VITESSE_CONTROLE_KMH;
     return v_kmh >= seuil;
 #else
-    (void) deja_en_controle; (void) p; (void) v_ok; (void) v_kmh;
+    (void) deja_en_controle; (void) v_ok; (void) v_kmh;
+    return true;                                    // le bouton suffit
+#endif
+#else
+    (void) deja_en_controle; (void) arme; (void) v_ok; (void) v_kmh;
     (void) sonars_ok; (void) bits;
     return false;                                   // pas de foils : jamais CONTROLE
 #endif
@@ -149,6 +172,7 @@ void Task_StateMachine(void *ptr)
             for (int i = 0; i < NB_CANAUX; i++) {
                 sonars_ok = sonars_ok && Sonar_io[i];
             }
+            sonars_ok = sonars_ok && Sonar_zero_ok;   // zéro sur l'eau fait (UI → Calibration)
             for (int k = 0; k < NB_VESC; k++) {
                 if (ESC_data[k].vivant) { erpm_reel += fabsf((float)ESC_data[k].erpm); nb_vesc++; }
             }
@@ -159,6 +183,8 @@ void Task_StateMachine(void *ptr)
         // Demandes de l'UI (boutons cruise) : lues et effacées à chaque
         // passage — une demande refusée n'est jamais gardée en attente.
         EventBits_t dem  = xEventGroupClearBits(egEtat, EVT_CRUISE_MASK);
+        // Bouton Foils de l'UI : idem (une demande refusée n'est pas gardée)
+        EventBits_t demF = xEventGroupClearBits(egEtat, EVT_FOILS_MASK);
 
         // 3) Logique d'état
         int     target   = 0;
@@ -171,6 +197,7 @@ void Task_StateMachine(void *ptr)
             target         = 0;
             levierArme     = false;
             CruiseSortir(CRUISE_FIN_ARRET);
+            FoilsDesarmer(FOILS_FIN_ARRET);
         }
         //  ── Real_V1 ──────────────────────────────────────────
         //  RUN exige un LOW franc sur I_Switch_ON (switch fermé).
@@ -181,6 +208,7 @@ void Task_StateMachine(void *ptr)
             target         = 0;
             levierArme     = false;      // il faudra repasser par le neutre
             CruiseSortir(CRUISE_FIN_IDLE);
+            FoilsDesarmer(FOILS_FIN_IDLE);
         }
         else {
             currentMode = ControlMode::RUN;
@@ -276,11 +304,29 @@ void Task_StateMachine(void *ptr)
             // AJOUT : CONTROLE = FORWARD + foils actifs.
             // En CRUISE les foils restent actifs aux mêmes conditions
             // (EVT_CONTROLE) ; l'état affiché reste CRUISE.
+            // Bouton Foils de l'UI : armer (pop-up confirmé) / désarmer
+            if (demF & EVT_FOILS_OFF) {
+                FoilsDesarmer(FOILS_FIN_UI);
+            } else if (demF & EVT_FOILS_ON) {
+                if (FOILS_ACTIFS) { foilsArme = true;  foilsFin = FOILS_FIN_AUCUNE; }
+                else              { foilsFin  = FOILS_REFUS_CONFIG; }
+            }
+
             if ((currentRunMode == RunMode::FORWARD || currentRunMode == RunMode::CRUISE) &&
-                ControleAutorise(controlePrec, pil, v_ok, v_kmh, sonars_ok, bits)) {
+                ControleAutorise(controlePrec, foilsArme, v_ok, v_kmh, sonars_ok, bits)) {
                 controle = true;
                 if (currentRunMode == RunMode::FORWARD) currentRunMode = RunMode::CONTROLE;
             }
+        }
+        // Demande d'armement reçue hors de RUN (IDLE / ARRET) : refusée
+        if (currentMode != ControlMode::RUN && (demF & EVT_FOILS_ON) && !(demF & EVT_FOILS_OFF)) {
+            foilsFin = FOILS_REFUS_ETAT;
+        }
+        // Durée en CONTROLE : remise à 0 à l'entrée, figée à la sortie
+        {
+            uint32_t t = millis();
+            if (controle && !controlePrec) controleDebutMs = t;
+            if (controle) controleDureeMs = t - controleDebutMs;
         }
         controlePrec = controle;
 
@@ -318,6 +364,10 @@ void Task_StateMachine(void *ptr)
             SM_cruise     = cruiseMode;
             SM_cruise_ms  = cruiseDureeMs;
             SM_cruise_fin = cruiseFin;
+            SM_foils_arme  = foilsArme;
+            SM_controle    = controle;
+            SM_controle_ms = controleDureeMs;
+            SM_foils_fin   = foilsFin;
             xSemaphoreGive(dataMutex);
         }
 

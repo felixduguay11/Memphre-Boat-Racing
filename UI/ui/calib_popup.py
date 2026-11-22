@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """calib_popup.py — pop-up « Calibration » de l'ecran d'accueil.
 
-Choix : le levier, ou un des 3 servos des foils, ou Annuler.
-Emet choisi("levier") ou choisi("servo") avec l'index du servo."""
+Choix : le levier, le zero des sonars (sur l'eau), un des 3 servos
+des foils, ou Annuler."""
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout
@@ -13,6 +13,7 @@ from . import config as cfg
 class CalibPopup(QFrame):
     MARGE = 16
     levier = Signal()
+    sonars = Signal()
     servo = Signal(int)             # 0 avant, 1 arriere gauche, 2 arriere droit
 
     def __init__(self, parent):
@@ -32,6 +33,7 @@ class CalibPopup(QFrame):
         haut = QHBoxLayout()
         haut.setSpacing(12)
         haut.addWidget(gros("Levier", self._levier), 1)
+        haut.addWidget(gros("Sonars\n(zéro sur l'eau)", self._sonars), 1)
 
         sous = QLabel("Servos des foils")
         sous.setObjectName("hint")
@@ -65,6 +67,10 @@ class CalibPopup(QFrame):
     def _levier(self):
         self.hide()
         self.levier.emit()
+
+    def _sonars(self):
+        self.hide()
+        self.sonars.emit()
 
     def _servo(self, i: int):
         self.hide()

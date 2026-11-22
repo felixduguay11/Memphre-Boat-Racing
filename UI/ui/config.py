@@ -473,6 +473,97 @@ def servo_calib_message(d: dict, i: int):
     return prefixe + "Calibration valide", True
 
 
+# ------------------------------------------------------------ zero des sonars (sur l'eau)
+# Bouton Calibration -> Sonars : bateau a l'eau, au repos, switch ON coupe.
+# Le Teensy fait la moyenne de chaque sonar pendant 5 s (SONAR_ZERO_DUREE_MS)
+# et l'enregistre en EEPROM ; consigne de vol = zero + hauteur (H_VOL_x_CM).
+# Trame : "sz": {"a": mesure en cours, "t": secondes restantes, "r": resultat,
+#   "rs": resultat de chaque sonar, "ok": zero valide, "z": zeros (cm),
+#   "e": plus grand ecart a la moyenne (cm), "hv": hauteurs de vol (cm),
+#   "em": ecart max accepte (cm)}. Ordre : avant, arr. gauche, arr. droit.
+SONAR_ZERO_PAYLOAD = {"cmd": "sonar_zero"}
+SONAR_NOMS = ["avant", "arrière gauche", "arrière droit"]
+SONAR_CLES = ["av", "ag", "ad"]          # cles de "son" / "sio", meme ordre
+SONAR_ZERO_RES = {
+    1: "Zéro enregistré",
+    2: "Refusé : couper le switch ON",
+    3: "Arrêté : le switch ON a été activé",
+    4: "Refusé : un sonar n'était pas valide (sortie TOR)",
+    5: "Refusé : la mesure bouge trop (vagues, bateau qui bouge)",
+    6: "Refusé : hors plage du sonar (ou zéro + hauteur de vol trop grand)",
+    7: "Sonars désactivés dans le firmware (SONARS_ACTIFS = 0)",
+}
+
+
+def _sz(d: dict) -> dict:
+    return d.get("sz") or {}
+
+
+def _sz_liste(d: dict, cle: str, i: int):
+    v = _sz(d).get(cle) or []
+    return v[i] if i < len(v) else None
+
+
+def sonar_zero_actif(d: dict) -> bool:
+    return bool(_sz(d).get("a"))
+
+
+def sonar_zero_ok(d: dict) -> bool:
+    return bool(_sz(d).get("ok"))
+
+
+def sonar_distance_text(d: dict, i: int) -> str:
+    v = (d.get("son") or {}).get(SONAR_CLES[i])
+    return "--" if v is None else "%.1f cm" % v
+
+
+def sonar_zero_text(d: dict, i: int) -> str:
+    z = _sz_liste(d, "z", i)
+    return "zéro %.1f cm" % z if sonar_zero_ok(d) and z is not None else "zéro : --"
+
+
+def sonar_hauteur_text(d: dict, i: int) -> str:
+    """Hauteur au-dessus du zero (distance actuelle - zero)."""
+    v = (d.get("son") or {}).get(SONAR_CLES[i])
+    z = _sz_liste(d, "z", i)
+    if v is None or z is None or not sonar_zero_ok(d):
+        return "hauteur : --"
+    return "hauteur %+.1f cm" % (v - z)
+
+
+def sonar_vol_text(d: dict, i: int) -> str:
+    h = _sz_liste(d, "hv", i)
+    return "vol : %+.0f cm" % h if h is not None else "vol : --"
+
+
+def sonar_res_text(d: dict, i: int):
+    """Resultat de ce sonar a la derniere mesure : (texte, ok) ou ("", None)."""
+    r = _sz_liste(d, "rs", i)
+    e = _sz_liste(d, "e", i)
+    if not r or sonar_zero_actif(d):
+        return "", None
+    if r == 1:
+        return "OK (±%.1f cm)" % (e or 0.0), True
+    if r == 5:
+        return "bouge : ±%.1f cm (max %.0f)" % (e or 0.0, _sz(d).get("em", 0)), False
+    return {4: "non valide", 6: "hors plage"}.get(r, "refusé"), False
+
+
+def sonar_zero_message(d: dict):
+    """(texte, ok) sous le bouton Mesurer."""
+    sz = _sz(d)
+    if not sz:
+        return "Pas de données du zéro dans la trame (firmware à jour ?)", False
+    if sz.get("a"):
+        return "Mesure en cours : %d s, ne pas bouger le bateau" % sz.get("t", 0), None
+    r = int(sz.get("r", 0))
+    if r in SONAR_ZERO_RES:
+        return SONAR_ZERO_RES[r], r == 1
+    if sz.get("ok"):
+        return "Zéro en service (enregistré dans le Teensy)", True
+    return "Pas de zéro : le mesurer bateau à l'eau, au repos", False
+
+
 # ------------------------------------------------------------ cruise control
 # Case « Cruise control » en bas a droite de la page Moteurs :
 #   cruise arrete -> pop-up a 3 choix : ERPM / vitesse GPS / Annuler
@@ -574,6 +665,96 @@ def cruise_fin(d: dict) -> int:
 def cruise_fin_text(d: dict) -> str:
     n = cruise_fin(d)
     return CRUISE_FINS.get(n, "fin %d" % n)
+
+
+# ------------------------------------------------------------ bouton Foils (page Moteurs)
+# Bouton Foils -> pop-up Confirmer / Annuler -> {"cmd":"foils_on"} : le
+# contrôle des foils est armé ; CONTROLE s'active seul quand les conditions
+# sont là (vitesse >= fc.v si la condition est active dans config.h).
+# 2e appui -> {"cmd":"foils_off"}. Stop, switch ON coupé, ARRET désarment.
+# Trame : "fc": {"dispo" (FOILS_ACTIFS), "arm", "ctl" (CONTROLE), "t" (durée
+#   en CONTROLE, ms, figée à la sortie), "fin" (FOILS_FINS), "v" (km/h
+#   d'entrée, 0 = pas de condition de vitesse), "m" (bits 0 hauteur, 1 roll,
+#   2 pitch)}
+FOILS_ON_PAYLOAD = {"cmd": "foils_on"}
+FOILS_OFF_PAYLOAD = {"cmd": "foils_off"}
+FOILS_CHOIX_S = 15                # le pop-up se ferme seul après ce temps
+FOILS_FINS = {
+    1: "Foils désarmé",
+    2: "Foils désarmé : switch ON coupé",
+    3: "Foils désarmé : ARRET",
+    4: "Foils refusé : pas en RUN",
+    5: "Foils refusé : FOILS_ACTIFS à 0",
+}
+FOILS_REFUS = (4, 5)
+FOILS_MODES = [(1, "hauteur"), (2, "roll"), (4, "pitch")]
+
+
+def _fc(d: dict) -> dict:
+    return d.get("fc") or {}
+
+
+def foils_dispo(d: dict) -> bool:
+    return bool(_fc(d).get("dispo"))
+
+
+def foils_arme(d: dict) -> bool:
+    return bool(_fc(d).get("arm"))
+
+
+def foils_actif(d: dict) -> bool:
+    return bool(_fc(d).get("ctl"))
+
+
+def foils_possible(d: dict) -> bool:
+    """Armer sert à quelque chose : FOILS_ACTIFS et RUN (sinon refusé)."""
+    return foils_dispo(d) and d.get("mode") == "RUN"
+
+
+def foils_bouton_texte(d: dict) -> str:
+    if foils_actif(d):
+        return "Foils actif"
+    return "Foils armé" if foils_arme(d) else "Foils"
+
+
+def foils_timer_text(d: dict) -> str:
+    """Durée en CONTROLE en min:s (figée après la sortie)."""
+    if "t" not in _fc(d):
+        return "--:--"
+    s = int(_fc(d)["t"]) // 1000
+    return "%d:%02d" % (s // 60, s % 60)
+
+
+def foils_condition_text(d: dict) -> str:
+    v = float(_fc(d).get("v", 0) or 0)
+    return ("au-dessus de %.0f km/h" % v) if v > 0 else "dès que le levier est poussé"
+
+
+def foils_condition_court(d: dict) -> str:
+    """Pour la ligne sous le timer (place limitée)."""
+    v = float(_fc(d).get("v", 0) or 0)
+    return ("> %.0f km/h" % v) if v > 0 else "levier poussé"
+
+
+def foils_mode_actif(d: dict, bit: int) -> bool:
+    m = _fc(d).get("m")
+    return True if m is None else bool(int(m) & bit)
+
+
+def foils_modes_text(d: dict) -> str:
+    on = [nom for bit, nom in FOILS_MODES if foils_mode_actif(d, bit)]
+    off = [nom for bit, nom in FOILS_MODES if not foils_mode_actif(d, bit)]
+    t = "PID : " + (" + ".join(on) if on else "aucun")
+    return t + ("  (désactivé : %s)" % ", ".join(off) if off else "")
+
+
+def foils_fin(d: dict) -> int:
+    return int(_fc(d).get("fin", 0))
+
+
+def foils_fin_text(d: dict) -> str:
+    n = foils_fin(d)
+    return FOILS_FINS.get(n, "") if n else ""
 
 
 def cruise_attend_rearme(d: dict) -> bool:
@@ -724,7 +905,7 @@ def servo_text(d: dict, key: str) -> str:
         return "Servo : --"
     if c is None:
         return "Servo %d µs" % v
-    return "Servo %d µs  (%+.1f°)" % (v, (v - c[1]) / SERVO_US_PAR_DEG)
+    return "%d µs  (%+.1f°)" % (v, (v - c[1]) / SERVO_US_PAR_DEG)
 
 
 def servo_pct(d: dict, key: str):
@@ -742,8 +923,25 @@ def foils_status(d: dict):
     if "foils" not in d:
         return "Foils : absent de la trame", None
     if _foils(d).get("on"):
-        return "Foils : CONTROLE actif", True
-    return "Foils : servos au neutre", None
+        return "CONTROLE actif", True
+    if "fc" in d:
+        if foils_arme(d):
+            return "Armé : " + foils_condition_text(d), None
+        return "Désarmé (bouton Foils)", None
+    return "Servos au neutre", None
+
+
+def foils_angle_text(d: dict, key: str) -> str:
+    """Angle du bateau (Xsens) : key = "pitch" ou "roll"."""
+    return _angle(d, key, "%+.1f°")
+
+
+def foils_pid_text(d: dict, key: str) -> str:
+    """Sortie du PID pitch (key "p") ou roll ("r")."""
+    if not foils_mode_actif(d, 4 if key == "p" else 2):
+        return "PID désactivé"
+    v = _foils(d).get(key)
+    return "PID %+.1f" % (v + 0.0) if v is not None else "PID --"
 
 
 def foils_info(d: dict) -> str:
