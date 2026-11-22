@@ -13,8 +13,11 @@
 
 static const int PINS[NB_CANAUX] = {PWM_Servo_Avant, PWM_Servo_Arriere_Gauche, PWM_Servo_Arriere_Droit};
 
-static_assert(SERVO_US_ABS_MIN < SERVO_US_CENTRE && SERVO_US_CENTRE < SERVO_US_ABS_MAX,
-              "SERVO_US_CENTRE doit etre entre SERVO_US_ABS_MIN et SERVO_US_ABS_MAX");
+static const int CENTRES[NB_CANAUX] = {SERVO_US_CENTRE_AVANT, SERVO_US_CENTRE_ARRIERE_GAUCHE, SERVO_US_CENTRE_ARRIERE_DROIT};
+static_assert(SERVO_US_ABS_MIN < SERVO_US_CENTRE_AVANT && SERVO_US_CENTRE_AVANT < SERVO_US_ABS_MAX &&
+              SERVO_US_ABS_MIN < SERVO_US_CENTRE_ARRIERE_GAUCHE && SERVO_US_CENTRE_ARRIERE_GAUCHE < SERVO_US_ABS_MAX &&
+              SERVO_US_ABS_MIN < SERVO_US_CENTRE_ARRIERE_DROIT && SERVO_US_CENTRE_ARRIERE_DROIT < SERVO_US_ABS_MAX,
+              "SERVO_US_CENTRE_x doit etre entre SERVO_US_ABS_MIN et SERVO_US_ABS_MAX");
 static_assert(SERVO_CALIB_PAS_MAX > 0, "SERVO_CALIB_PAS_MAX doit etre > 0");
 
 // ─── Calibration en service (protégée par mtx : lue par Task_foils_Control) ───
@@ -23,7 +26,7 @@ static SemaphoreHandle_t mtx = NULL;
 
 // ─── État de la calibration (utilisé par Task_RPi seulement ; actif lu par les foils) ───
 static volatile int8_t actif = -1;
-static int      pos      = SERVO_US_CENTRE;      // µs commandés au servo en calibration
+static int      pos      = SERVO_US_CENTRE_AVANT; // µs commandés au servo en calibration
 static uint32_t vie_ms   = 0;
 static uint8_t  res      = SCR_AUCUN;
 static uint8_t  derniere = SV_NEUTRE;
@@ -196,10 +199,10 @@ void ServoCalib_Commande(const char* ligne, bool switch_on)
             res = SCR_REFUS_ON;
             return;
         }
-        // Départ : neutre déjà enregistré (reprise), sinon centre du servo
+        // Départ : neutre déjà enregistré (reprise), sinon SERVO_US_CENTRE_x
         uint16_t neu = 0;
         if (Verrou()) { neu = cal[s][SV_NEUTRE]; Deverrou(); }
-        pos    = neu ? neu : SERVO_US_CENTRE;
+        pos    = neu ? neu : CENTRES[s];     // SERVO_US_CENTRE_x (config.h)
         actif  = (int8_t)s;
         vie_ms = now;
         res    = SCR_AUCUN;

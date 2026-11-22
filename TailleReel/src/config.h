@@ -9,7 +9,7 @@
 // 0 = sans foils : Sonar et Foils ne sont PAS créées, l'état
 //     CONTROLE est inatteignable. Xsens reste actif (logging
 //     GPS / attitude envoyé au Raspberry Pi).
-#define FOILS_ACTIFS    0
+#define FOILS_ACTIFS    1
 
 // 1 = sonars lus et envoyés au Pi (blocs "son" / "sio") même sans
 //     foils : sert à vérifier les sonars à quai ou bateau à l'eau,
@@ -113,7 +113,11 @@
 #define SERVO_PWM_BITS           15       // 0,6 µs par pas à 50 Hz
 #define SERVO_US_ABS_MIN         900      // limites de la fiche, jamais dépassées
 #define SERVO_US_ABS_MAX         2100
-#define SERVO_US_CENTRE          1500     // départ de la calibration si pas de neutre valide
+// Position de départ de la calibration de chaque servo (µs), tant qu'il n'a
+// pas de neutre enregistré. Ensuite, la calibration repart du neutre enregistré.
+#define SERVO_US_CENTRE_AVANT            1575
+#define SERVO_US_CENTRE_ARRIERE_GAUCHE   1800
+#define SERVO_US_CENTRE_ARRIERE_DROIT    1850
 #define SERVO_US_PAR_DEG         10.0f    // sorties des PID (degrés servo) → µs
 #define SERVO_CALIB_EEPROM_ADDR  64       // levier à l'adresse 0
 #define SERVO_CALIB_PAS_MAX      50       // µs : plus grand pas accepté par commande
@@ -563,8 +567,8 @@
 //----------- PINS TEENSY ------------//
 //#define RX1                         0
 //#define TX1                         1
-#define PWM_Servo_Avant             2
-#define PWM_Servo_Arriere_Gauche    3
+#define PWM_Servo_Avant             3
+#define PWM_Servo_Arriere_Gauche    2
 #define PWM_Servo_Arriere_Droit     4
 //#define PIN_5                       5
 //#define PIN_6                       6
