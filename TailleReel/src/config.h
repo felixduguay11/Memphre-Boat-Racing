@@ -95,7 +95,7 @@
 // de la moyenne de plus de SONAR_ZERO_ECART_MAX_CM (vagues, bateau qui
 // bouge), ou si zéro + hauteur de vol dépasse SONAR_DIST_MAX_CM.
 #define SONAR_ZERO_DUREE_MS     5000
-#define SONAR_ZERO_ECART_MAX_CM 6.0f      // ± autour de la moyenne
+#define SONAR_ZERO_ECART_MAX_CM 15.0f      // ± autour de la moyenne
 #define SONAR_ZERO_EEPROM_ADDR  96        // levier à 0, servos à 64
 //------------------------------------//
 
@@ -493,7 +493,7 @@
 //   (2e appui), Stop de l'UI, switch ON coupé (IDLE), ARRET. Armé, on
 //   revient seul en CONTROLE quand les conditions sont de nouveau là.
 #define FOILS_CONDITION_VITESSE  0      // 0 = pas de condition de vitesse : le bouton suffit
-#define SM_VITESSE_CONTROLE_KMH  12.0f
+#define SM_VITESSE_CONTROLE_KMH  15.5f
 #define SM_VITESSE_HYST_KMH      1.0f
 #define FSM_QUEUE_LEN            8
 //------------------------------------//
