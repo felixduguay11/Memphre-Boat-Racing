@@ -154,7 +154,7 @@
 #define H_VOL_ARRIERE_GAUCHE_CM     40.0f
 #define H_VOL_ARRIERE_DROIT_CM      40.0f
 
-#define H_DEADBAND_ERR          1.0f
+#define H_DEADBAND_ERR          8.0f
 #define H_DEADBAND_DERIV        0.3f
 #define H_INTEGRAL_MAX          60.0f    // cm·s (20 → 60 le 22/11 : hauteur indépendante de la vitesse)
 #define H_INTEGRAL_MIN          -60.0f
